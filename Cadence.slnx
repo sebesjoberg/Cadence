@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Cadence.Abstractions/Cadence.Abstractions.csproj" />
     <Project Path="src/Cadence.Core/Cadence.Core.csproj" />
+    <Project Path="src/Cadence.Storage.Sql/Cadence.Storage.Sql.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Cadence.Core.Tests/Cadence.Core.Tests.csproj" />

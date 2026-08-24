@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <RootNamespace>Cadence.Storage.Sql</RootNamespace>
+    <Description>SQL Server storage for Cadence: occurrence claiming, persistent run history, DB-editable schedules, instance registry and janitor.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cadence.Core\Cadence.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    The schema scripts ship inside the assembly so the migrator has no file-system dependency, and
+    are mirrored into scripts/sql/ by a target below for DBAs who apply them by hand.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Scripts\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cadence.Storage.Sql.Tests" />
+  </ItemGroup>
+
+</Project>
