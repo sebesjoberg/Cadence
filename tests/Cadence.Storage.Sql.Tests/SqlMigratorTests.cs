@@ -8,7 +8,7 @@ namespace Cadence.Storage.Sql.Tests;
 /// <summary>
 /// The migrator, against a real database.
 /// </summary>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class SqlMigratorTests
 {
     private readonly SqlServerFixture _fixture;
@@ -16,7 +16,7 @@ public sealed class SqlMigratorTests
     public SqlMigratorTests(SqlServerFixture fixture) => _fixture = fixture;
 
     [SkippableFact]
-    public async Task Every_table_and_the_claim_index_exist_after_migrating()
+    public async Task EveryTableAndTheClaimIndexExistAfterMigrating()
     {
         var options = await _fixture.CreateMigratedAsync("migrate");
         var database = new SqlDatabase(options);
@@ -50,7 +50,7 @@ public sealed class SqlMigratorTests
     }
 
     [SkippableFact]
-    public async Task Migrating_twice_changes_nothing()
+    public async Task MigratingTwiceChangesNothing()
     {
         var options = await _fixture.CreateMigratedAsync("twice");
 
@@ -65,7 +65,7 @@ public sealed class SqlMigratorTests
     }
 
     [SkippableFact]
-    public async Task Concurrent_migrators_serialise_and_all_succeed()
+    public async Task ConcurrentMigratorsSerialiseAndAllSucceed()
     {
         // What a rolling deployment does: replicas start together and all reach the migrator within
         // milliseconds. Without the application lock they race on CREATE TABLE and the losers fail
@@ -93,7 +93,7 @@ public sealed class SqlMigratorTests
     }
 
     [SkippableFact]
-    public async Task A_custom_schema_is_created_and_used()
+    public async Task ACustomSchemaIsCreatedAndUsed()
     {
         var options = await _fixture.CreateMigratedAsync("custom", o => o.SchemaName = "cadence");
         var database = new SqlDatabase(options);
@@ -108,7 +108,7 @@ public sealed class SqlMigratorTests
     }
 
     [SkippableFact]
-    public async Task Applying_the_script_by_hand_first_is_not_an_error()
+    public async Task ApplyingTheScriptByHandFirstIsNotAnError()
     {
         // The AutoMigrate = false path: a DBA runs scripts/sql, then the application starts with
         // migration on anyway. Every statement in the script is guarded, so this has to be a no-op.
@@ -138,7 +138,7 @@ public sealed class SqlMigratorTests
     }
 
     [Fact]
-    public void Batches_split_on_a_lone_GO_line()
+    public void BatchesSplitOnALoneGOLine()
     {
         var batches = SqlMigrator.SplitBatches("SELECT 1;\nGO\nSELECT 2;\ngo\nSELECT 3;");
 
@@ -149,7 +149,7 @@ public sealed class SqlMigratorTests
     }
 
     [Fact]
-    public void GO_inside_a_statement_is_not_a_separator()
+    public void GOInsideAStatementIsNotASeparator()
     {
         // Only a line that is nothing but GO separates batches, so an identifier or string containing
         // those letters is left alone.
@@ -159,13 +159,13 @@ public sealed class SqlMigratorTests
     }
 
     [Fact]
-    public void Empty_batches_are_dropped()
+    public void EmptyBatchesAreDropped()
     {
         Assert.Empty(SqlMigrator.SplitBatches("GO\n\nGO\n   \nGO"));
     }
 
     [SkippableFact]
-    public async Task An_unreachable_database_fails_loudly_rather_than_quietly()
+    public async Task AnUnreachableDatabaseFailsLoudlyRatherThanQuietly()
     {
         Skip.If(Docker.SkipReason is not null, Docker.SkipReason ?? string.Empty);
 

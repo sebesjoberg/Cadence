@@ -18,15 +18,8 @@
     <ProjectReference Include="..\Cadence.Abstractions\Cadence.Abstractions.csproj" />
   </ItemGroup>
 
-  <!--
-    The tick loop is internal, and the tests that matter most drive it directly with a fake clock
-    rather than waiting on a real timer. The SQL tests need the same access: "N instances, one run
-    per occurrence" cannot be demonstrated against the no-op coordinator, so that test has to live
-    beside a real store while still driving the real loop.
-  -->
   <ItemGroup>
     <InternalsVisibleTo Include="Cadence.Core.Tests" />
-    <InternalsVisibleTo Include="Cadence.Storage.Sql.Tests" />
   </ItemGroup>
 
 </Project>

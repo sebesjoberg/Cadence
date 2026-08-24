@@ -14,7 +14,7 @@ namespace Cadence.Core.Tests;
 public class ProgressTelemetryTests
 {
     [Fact]
-    public void Progress_becomes_an_event_on_the_run_activity()
+    public void ProgressBecomesAnEventOnTheRunActivity()
     {
         var recorded = new List<Activity>();
 
@@ -49,7 +49,7 @@ public class ProgressTelemetryTests
     }
 
     [Fact]
-    public void Progress_is_written_through_the_standard_logger_pipeline()
+    public void ProgressIsWrittenThroughTheStandardLoggerPipeline()
     {
         var sink = BuildSink(out var logs);
 
@@ -62,7 +62,7 @@ public class ProgressTelemetryTests
     }
 
     [Fact]
-    public async Task Progress_also_lands_in_history_for_the_dashboard_to_read_back()
+    public async Task ProgressAlsoLandsInHistoryForTheDashboardToReadBack()
     {
         var history = new InMemoryRunHistoryStore();
         var clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 2, 0));

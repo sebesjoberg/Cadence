@@ -9,7 +9,7 @@ namespace Cadence.Storage.Sql.Tests;
 /// <summary>
 /// SQL-tier behaviour the shared conformance suite deliberately does not cover.
 /// </summary>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class SqlStorageTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 24, 11, 0, 0, TimeSpan.Zero);
@@ -19,7 +19,7 @@ public sealed class SqlStorageTests
     public SqlStorageTests(SqlServerFixture fixture) => _fixture = fixture;
 
     [SkippableFact]
-    public async Task A_claim_writes_the_run_row_itself()
+    public async Task AClaimWritesTheRunRowItself()
     {
         // Design plan 3.2: in SQL the claim *is* the run row, so there is no window where a slot is
         // taken but unrecorded. A process that dies right after claiming leaves something visible.
@@ -42,7 +42,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Starting_a_claimed_run_updates_the_claim_row_rather_than_inserting_a_second()
+    public async Task StartingAClaimedRunUpdatesTheClaimRowRatherThanInsertingASecond()
     {
         var options = await _fixture.CreateMigratedAsync("startclaimed");
         var runId = Guid.NewGuid();
@@ -72,7 +72,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task An_unclaimed_run_is_inserted_by_the_history_store()
+    public async Task AnUnclaimedRunIsInsertedByTheHistoryStore()
     {
         // Manual and API triggers never claim, and neither does a scheduled run under a coordinator
         // that does not write rows. Both still have to end up in history.
@@ -101,7 +101,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Triggered_runs_are_exempt_from_the_occurrence_index()
+    public async Task TriggeredRunsAreExemptFromTheOccurrenceIndex()
     {
         // The index is filtered on ScheduledForUtc IS NOT NULL precisely so that any number of
         // manual runs of one job can coexist. Without the filter, the second would be rejected.
@@ -126,7 +126,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task An_unreachable_database_throws_out_of_a_claim_rather_than_returning_false()
+    public async Task AnUnreachableDatabaseThrowsOutOfAClaimRatherThanReturningFalse()
     {
         /*
             The most important negative test in the package.
@@ -151,7 +151,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task A_missing_table_throws_out_of_a_claim_rather_than_returning_false()
+    public async Task AMissingTableThrowsOutOfAClaimRatherThanReturningFalse()
     {
         // Same rule as an unreachable server, and easier to hit by accident: someone points Cadence
         // at a database where the schema was never applied.
@@ -168,7 +168,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Progress_entries_are_written_in_batches()
+    public async Task ProgressEntriesAreWrittenInBatches()
     {
         var options = await _fixture.CreateMigratedAsync("batch", o => o.ProgressBatchSize = 10);
         await using var history = History(options);
@@ -207,7 +207,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task A_progress_message_longer_than_the_column_is_truncated_not_dropped()
+    public async Task AProgressMessageLongerThanTheColumnIsTruncatedNotDropped()
     {
         var options = await _fixture.CreateMigratedAsync("longmsg");
         await using var history = History(options);
@@ -241,7 +241,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Structured_progress_data_round_trips()
+    public async Task StructuredProgressDataRoundTrips()
     {
         var options = await _fixture.CreateMigratedAsync("data");
         await using var history = History(options);
@@ -280,7 +280,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task The_registry_records_and_refreshes_a_heartbeat()
+    public async Task TheRegistryRecordsAndRefreshesAHeartbeat()
     {
         var options = await _fixture.CreateMigratedAsync("heartbeat");
         var database = new SqlDatabase(options);
@@ -312,7 +312,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Instants_round_trip_as_utc_whatever_offset_they_arrive_with()
+    public async Task InstantsRoundTripAsUtcWhateverOffsetTheyArriveWith()
     {
         // Everything is stored as UTC DATETIME2. An instant handed in with an offset has to come back
         // as the same instant, or the occurrence index would compare wall-clock times across
@@ -343,7 +343,7 @@ public sealed class SqlStorageTests
     }
 
     [SkippableFact]
-    public async Task Two_instances_in_different_zones_contend_for_the_same_instant()
+    public async Task TwoInstancesInDifferentZonesContendForTheSameInstant()
     {
         // The consequence of the test above, stated as behaviour: the same instant expressed with
         // two different offsets is one occurrence, not two.
@@ -358,7 +358,7 @@ public sealed class SqlStorageTests
     }
 
     [Fact]
-    public void Options_reject_a_schema_name_that_is_not_an_identifier()
+    public void OptionsRejectASchemaNameThatIsNotAnIdentifier()
     {
         // The schema name is substituted into DDL rather than parameterised, so anything exotic is
         // refused outright rather than escaped and hoped for.
@@ -369,7 +369,7 @@ public sealed class SqlStorageTests
     }
 
     [Fact]
-    public void Options_reject_a_heartbeat_timeout_that_is_not_longer_than_the_interval()
+    public void OptionsRejectAHeartbeatTimeoutThatIsNotLongerThanTheInterval()
     {
         // Otherwise a single missed beat lets the janitor mark a live instance's runs as lost.
         var options = new SqlStorageOptions
@@ -384,14 +384,14 @@ public sealed class SqlStorageTests
     }
 
     [Fact]
-    public void Options_reject_a_missing_connection_string()
+    public void OptionsRejectAMissingConnectionString()
     {
         var error = Assert.Throws<ArgumentException>(new SqlStorageOptions().Validate);
         Assert.Equal(nameof(SqlStorageOptions.ConnectionString), error.ParamName);
     }
 
     [Fact]
-    public void Options_accept_the_defaults()
+    public void OptionsAcceptTheDefaults()
     {
         new SqlStorageOptions { ConnectionString = "Server=.;Database=cadence;" }.Validate();
     }

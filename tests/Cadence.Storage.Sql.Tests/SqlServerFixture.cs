@@ -123,7 +123,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
 /// <summary>Shares one container across every test class in the assembly.</summary>
 [CollectionDefinition(Name)]
-public sealed class SqlServerCollection : ICollectionFixture<SqlServerFixture>
+public sealed class SqlServerCollectionDefinition : ICollectionFixture<SqlServerFixture>
 {
     /// <summary>The collection name test classes opt into.</summary>
     public const string Name = "sql-server";

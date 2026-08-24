@@ -7,7 +7,6 @@
     <RootNamespace>Cadence.Storage.Conformance</RootNamespace>
     <!-- Same waivers as the other test projects: test code may log casually, name methods with
          underscores and skip ConfigureAwait. Every compiler warning is still an error. -->
-    <NoWarn>$(NoWarn);CA1848;CA1707;CA2007;CA1861;CA1812;CA1515</NoWarn>
     <!-- This project holds abstract test classes for others to inherit, so it must not itself be
          collected as a test assembly. -->
     <IsTestProject>false</IsTestProject>

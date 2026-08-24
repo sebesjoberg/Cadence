@@ -8,7 +8,6 @@
          waived. Test code is allowed to log casually, name methods with underscores, and skip
          ConfigureAwait: none of those matter outside a shipped library. Everything else, including
          every compiler warning, is still an error here. -->
-    <NoWarn>$(NoWarn);CA1848;CA1707;CA2007;CA1861;CA1812;CA1515</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

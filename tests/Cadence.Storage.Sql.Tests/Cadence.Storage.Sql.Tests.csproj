@@ -8,7 +8,6 @@
     <!-- Same waivers as the other test projects. Every compiler warning is still an error. -->
     <!-- CA1711 on top of the usual test waivers: xunit's own convention is that a collection
          definition is named "...Collection", and matching the framework beats matching the rule. -->
-    <NoWarn>$(NoWarn);CA1848;CA1707;CA2007;CA1861;CA1812;CA1515;CA1711</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -30,7 +30,7 @@ public abstract class OccurrenceCoordinatorConformance
     protected abstract Task<IOccurrenceCoordinator> CreateAsync(string instanceId);
 
     [SkippableFact]
-    public async Task An_unclaimed_occurrence_is_granted()
+    public async Task AnUnclaimedOccurrenceIsGranted()
     {
         var coordinator = await CreateAsync("one");
 
@@ -38,7 +38,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task A_second_instance_loses_the_same_occurrence()
+    public async Task ASecondInstanceLosesTheSameOccurrence()
     {
         var first = await CreateAsync("one");
         var second = await CreateAsync("two");
@@ -48,7 +48,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task Different_occurrences_of_one_job_are_independent()
+    public async Task DifferentOccurrencesOfOneJobAreIndependent()
     {
         var coordinator = await CreateAsync("one");
 
@@ -57,7 +57,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task Different_jobs_at_the_same_instant_are_independent()
+    public async Task DifferentJobsAtTheSameInstantAreIndependent()
     {
         var coordinator = await CreateAsync("one");
 
@@ -66,7 +66,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task Re_claiming_with_the_same_run_id_is_granted_again()
+    public async Task ReClaimingWithTheSameRunIdIsGrantedAgain()
     {
         /*
             The idempotency property, and the reason the run id is assigned by the caller.
@@ -84,7 +84,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task Re_claiming_with_a_different_run_id_is_refused()
+    public async Task ReClaimingWithADifferentRunIdIsRefused()
     {
         // The mirror of the test above: idempotency must not soften into "always grant on retry".
         var coordinator = await CreateAsync("one");
@@ -94,7 +94,7 @@ public abstract class OccurrenceCoordinatorConformance
     }
 
     [SkippableFact]
-    public async Task Exactly_one_of_many_simultaneous_claims_wins()
+    public async Task ExactlyOneOfManySimultaneousClaimsWins()
     {
         // The hammer. Every instance starts its tick on the same second, so this is not a contrived
         // scenario -- it is the normal case for a cluster whose clocks are in sync.

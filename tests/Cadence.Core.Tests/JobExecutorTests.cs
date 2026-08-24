@@ -15,7 +15,7 @@ public class JobExecutorTests
     private static readonly RunSettings Default = new() { Overlap = OverlapPolicy.Skip };
 
     [Fact]
-    public async Task A_successful_run_is_recorded_as_succeeded()
+    public async Task ASuccessfulRunIsRecordedAsSucceeded()
     {
         await using var fixture = Fixture.Create();
 
@@ -31,7 +31,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task A_throwing_job_is_recorded_as_failed_with_the_exception()
+    public async Task AThrowingJobIsRecordedAsFailedWithTheException()
     {
         await using var fixture = Fixture.Create();
 
@@ -44,7 +44,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task Exceeding_the_maximum_duration_is_recorded_as_timed_out_not_aborted()
+    public async Task ExceedingTheMaximumDurationIsRecordedAsTimedOutNotAborted()
     {
         await using var fixture = Fixture.Create();
 
@@ -60,7 +60,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task Shutdown_records_an_in_flight_run_as_aborted()
+    public async Task ShutdownRecordsAnInFlightRunAsAborted()
     {
         await using var fixture = Fixture.Create();
 
@@ -72,7 +72,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task Skip_policy_records_the_second_occurrence_as_skipped_with_a_reason()
+    public async Task SkipPolicyRecordsTheSecondOccurrenceAsSkippedWithAReason()
     {
         await using var fixture = Fixture.Create();
 
@@ -95,7 +95,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task AllowConcurrent_starts_a_second_run_in_a_scope_of_its_own()
+    public async Task AllowConcurrentStartsASecondRunInAScopeOfItsOwn()
     {
         await using var fixture = Fixture.Create();
         var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
@@ -116,7 +116,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task The_per_instance_concurrency_cap_skips_rather_than_queues()
+    public async Task ThePerInstanceConcurrencyCapSkipsRatherThanQueues()
     {
         await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
         var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
@@ -133,7 +133,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task Capacity_is_released_when_a_run_finishes()
+    public async Task CapacityIsReleasedWhenARunFinishes()
     {
         await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
 
@@ -148,7 +148,7 @@ public class JobExecutorTests
     }
 
     [Fact]
-    public async Task Reported_progress_lands_in_run_history()
+    public async Task ReportedProgressLandsInRunHistory()
     {
         await using var fixture = Fixture.Create();
 

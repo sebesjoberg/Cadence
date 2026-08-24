@@ -12,7 +12,7 @@ namespace Cadence.Storage.Sql.Tests;
 /// Every pass is driven directly with a fake clock rather than by waiting for the timer, so nothing
 /// here sleeps and nothing is timing-dependent.
 /// </remarks>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class CadenceJanitorTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 24, 12, 0, 0, TimeSpan.Zero);
@@ -22,7 +22,7 @@ public sealed class CadenceJanitorTests
     public CadenceJanitorTests(SqlServerFixture fixture) => _fixture = fixture;
 
     [SkippableFact]
-    public async Task History_older_than_the_retention_age_is_purged()
+    public async Task HistoryOlderThanTheRetentionAgeIsPurged()
     {
         var harness = await CreateAsync("age", retention: new RetentionOptions { MaxAge = TimeSpan.FromDays(7) });
 
@@ -38,7 +38,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task Each_job_is_trimmed_to_the_per_job_cap_keeping_the_newest()
+    public async Task EachJobIsTrimmedToThePerJobCapKeepingTheNewest()
     {
         var harness = await CreateAsync(
             "trim", retention: new RetentionOptions { MaxRunsPerJob = 3, MaxAge = TimeSpan.FromDays(365) });
@@ -59,7 +59,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task The_per_job_cap_is_applied_per_job_not_across_all_jobs()
+    public async Task ThePerJobCapIsAppliedPerJobNotAcrossAllJobs()
     {
         var harness = await CreateAsync(
             "perjob", retention: new RetentionOptions { MaxRunsPerJob = 2, MaxAge = TimeSpan.FromDays(365) });
@@ -77,7 +77,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_run_left_behind_by_a_dead_instance_becomes_lost()
+    public async Task ARunLeftBehindByADeadInstanceBecomesLost()
     {
         var harness = await CreateAsync("reap");
 
@@ -101,7 +101,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_live_instance_keeps_its_running_run()
+    public async Task ALiveInstanceKeepsItsRunningRun()
     {
         var harness = await CreateAsync("live");
 
@@ -120,7 +120,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_running_run_whose_instance_deregistered_is_reaped()
+    public async Task ARunningRunWhoseInstanceDeregisteredIsReaped()
     {
         // A graceful stop deletes the instance row. A run still Running afterwards was never
         // completed either, so it should not wait out the heartbeat timeout to be resolved.
@@ -137,7 +137,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_reaped_run_extends_the_failure_streak()
+    public async Task AReapedRunExtendsTheFailureStreak()
     {
         // The point of reaping: a job whose host keeps dying should trip an alert threshold, not sit
         // at zero consecutive failures forever because nothing ever wrote a failure.
@@ -150,7 +150,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_long_dead_instance_row_is_removed()
+    public async Task ALongDeadInstanceRowIsRemoved()
     {
         var harness = await CreateAsync("instances");
 
@@ -169,7 +169,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_recently_dead_instance_row_outlives_the_decision_that_it_was_dead()
+    public async Task ARecentlyDeadInstanceRowOutlivesTheDecisionThatItWasDead()
     {
         // Deleting the row at the same moment its runs are reaped would leave history pointing at an
         // instance nothing can explain -- which is exactly the question someone reads history to
@@ -195,7 +195,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task A_pass_over_an_empty_database_does_nothing_and_does_not_throw()
+    public async Task APassOverAnEmptyDatabaseDoesNothingAndDoesNotThrow()
     {
         var harness = await CreateAsync("empty");
 
@@ -206,7 +206,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task Batching_does_not_change_the_outcome()
+    public async Task BatchingDoesNotChangeTheOutcome()
     {
         // The batch loop has to keep going until a pass is done, or a backlog larger than one batch
         // would be trimmed a slice per interval and never catch up.
@@ -226,7 +226,7 @@ public sealed class CadenceJanitorTests
     }
 
     [SkippableFact]
-    public async Task Purging_a_run_takes_its_progress_entries_with_it()
+    public async Task PurgingARunTakesItsProgressEntriesWithIt()
     {
         var harness = await CreateAsync(
             "cascade", retention: new RetentionOptions { MaxAge = TimeSpan.FromDays(1) });

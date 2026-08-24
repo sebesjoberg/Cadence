@@ -9,7 +9,7 @@ namespace Cadence.Core.Tests;
 public class JobGraphValidatorTests
 {
     [Fact]
-    public async Task A_resolvable_job_passes()
+    public async Task AResolvableJobPasses()
     {
         var validator = Build(StartupValidation.ThrowOnStartup, registerDependencies: true);
 
@@ -19,7 +19,7 @@ public class JobGraphValidatorTests
     }
 
     [Fact]
-    public async Task An_unresolvable_job_takes_the_host_down_by_default()
+    public async Task AnUnresolvableJobTakesTheHostDownByDefault()
     {
         var validator = Build(StartupValidation.ThrowOnStartup, registerDependencies: false);
 
@@ -33,7 +33,7 @@ public class JobGraphValidatorTests
     }
 
     [Fact]
-    public async Task DisableFailingJobs_starts_the_host_and_reports_which_jobs_are_out()
+    public async Task DisableFailingJobsStartsTheHostAndReportsWhichJobsAreOut()
     {
         var validator = Build(StartupValidation.DisableFailingJobs, registerDependencies: false);
 
@@ -43,7 +43,7 @@ public class JobGraphValidatorTests
     }
 
     [Fact]
-    public async Task WarnOnly_leaves_the_job_scheduled()
+    public async Task WarnOnlyLeavesTheJobScheduled()
     {
         var validator = Build(StartupValidation.WarnOnly, registerDependencies: false);
 

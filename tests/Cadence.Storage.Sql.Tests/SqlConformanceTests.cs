@@ -14,7 +14,7 @@ namespace Cadence.Storage.Sql.Tests;
 /// tiers disagree about shows up here, which is the only reliable way to keep "just add a connection
 /// string" from quietly changing behaviour.
 /// </remarks>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class SqlRunHistoryStoreConformanceTests : RunHistoryStoreConformance, IAsyncDisposable
 {
     private readonly SqlServerFixture _fixture;
@@ -54,7 +54,7 @@ public sealed class SqlRunHistoryStoreConformanceTests : RunHistoryStoreConforma
 /// Runs the clustering contract against SQL Server. This is where the guarantee is actually proven —
 /// it cannot be tested against the no-op coordinator, which grants everything.
 /// </summary>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class SqlOccurrenceCoordinatorConformanceTests : OccurrenceCoordinatorConformance
 {
     private readonly SqlServerFixture _fixture;
@@ -80,7 +80,7 @@ public sealed class SqlOccurrenceCoordinatorConformanceTests : OccurrenceCoordin
 /// <summary>
 /// Runs the schedule-source contract against SQL Server, including the polling change token.
 /// </summary>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class SqlScheduleSourceConformanceTests : ScheduleSourceConformance
 {
     private readonly SqlServerFixture _fixture;

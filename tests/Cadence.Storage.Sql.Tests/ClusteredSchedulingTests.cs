@@ -24,11 +24,11 @@ namespace Cadence.Storage.Sql.Tests;
 /// </para>
 /// <para>
 /// Each instance gets its own service provider, its own executor and its own instance id, so nothing
-/// is shared except the database. The tick loop is driven directly with a fake clock, so the test is
+/// is shared except the database. Each drives the real <see cref="ScheduleTicker"/> with a fake clock, so this is
 /// deterministic and instant rather than a race against a real timer.
 /// </para>
 /// </remarks>
-[Collection(SqlServerCollection.Name)]
+[Collection(SqlServerCollectionDefinition.Name)]
 public sealed class ClusteredSchedulingTests
 {
     private const string Hourly = "0 * * * *";
@@ -40,7 +40,7 @@ public sealed class ClusteredSchedulingTests
     public ClusteredSchedulingTests(SqlServerFixture fixture) => _fixture = fixture;
 
     [SkippableFact]
-    public async Task Two_instances_run_one_occurrence_once()
+    public async Task TwoInstancesRunOneOccurrenceOnce()
     {
         await using var cluster = await Cluster.CreateAsync(_fixture, instances: 2);
 
@@ -59,7 +59,7 @@ public sealed class ClusteredSchedulingTests
     }
 
     [SkippableFact]
-    public async Task Five_instances_ticking_together_still_run_one_occurrence_once()
+    public async Task FiveInstancesTickingTogetherStillRunOneOccurrenceOnce()
     {
         // Instances in a cluster with synchronised clocks all tick on the same second, so the
         // contended case is the normal one rather than an edge case.
@@ -75,7 +75,7 @@ public sealed class ClusteredSchedulingTests
     }
 
     [SkippableFact]
-    public async Task Successive_occurrences_can_land_on_different_instances()
+    public async Task SuccessiveOccurrencesCanLandOnDifferentInstances()
     {
         // The claim is per occurrence, not per job, so nothing pins a job to whichever instance won
         // last time. Both slots run exactly once between them, which is the property that matters.
@@ -95,7 +95,7 @@ public sealed class ClusteredSchedulingTests
     }
 
     [SkippableFact]
-    public async Task A_schedule_edited_through_one_instance_reaches_the_others()
+    public async Task AScheduleEditedThroughOneInstanceReachesTheOthers()
     {
         // The product claim: schedules live in a database and change at runtime. An edit that only
         // took effect on the instance that made it would make the dashboard misleading.
@@ -175,7 +175,7 @@ public sealed class ClusteredSchedulingTests
         {
             foreach (var instance in _instances)
             {
-                await instance.Service.TickAsync(instance.Clock.UtcNow, default);
+                await instance.Ticker.TickAsync(instance.Clock.UtcNow, default);
             }
 
             await WaitForIdleAsync();
@@ -189,7 +189,7 @@ public sealed class ClusteredSchedulingTests
             var ticks = _instances.Select(async instance =>
             {
                 await ready.Task;
-                await instance.Service.TickAsync(instance.Clock.UtcNow, default);
+                await instance.Ticker.TickAsync(instance.Clock.UtcNow, default);
             }).ToArray();
 
             ready.SetResult();
@@ -235,7 +235,7 @@ public sealed class ClusteredSchedulingTests
         private sealed record Instance(
             string Id,
             FixedClock Clock,
-            CadenceHostedService Service,
+            ScheduleTicker Ticker,
             JobExecutor Executor,
             SqlRunHistoryStore History,
             SqlScheduleSource Source,
@@ -287,27 +287,20 @@ public sealed class ClusteredSchedulingTests
                     cadenceOptions,
                     NullLogger<JobExecutor>.Instance);
 
-                var service = new CadenceHostedService(
+                var ticker = new ScheduleTicker(
                     registry,
                     new ScheduleResolver(registry, source),
-                    source,
                     coordinator,
                     history,
                     executor,
-                    new JobGraphValidator(
-                        registry,
-                        scopeFactory,
-                        new RegistrationDiagnostics([]),
-                        cadenceOptions,
-                        NullLogger<JobGraphValidator>.Instance),
                     new LastSuccessCache(clock),
                     clock,
                     metrics,
                     cadenceOptions,
-                    NullLogger<CadenceHostedService>.Instance);
+                    NullLogger<ScheduleTicker>.Instance);
 
                 return new Instance(
-                    instanceId, clock, service, executor, history, source, counter, provider);
+                    instanceId, clock, ticker, executor, history, source, counter, provider);
             }
 
             public async ValueTask DisposeAsync()

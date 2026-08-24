@@ -8,7 +8,7 @@ public class InMemoryRunHistoryStoreTests
     private static readonly DateTimeOffset Origin = Occurrences.Utc(2026, 8, 24, 2, 0);
 
     [Fact]
-    public async Task Consecutive_failures_stop_counting_at_the_last_success()
+    public async Task ConsecutiveFailuresStopCountingAtTheLastSuccess()
     {
         var store = new InMemoryRunHistoryStore();
 
@@ -21,7 +21,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task Skipped_and_aborted_runs_neither_extend_nor_break_a_failure_streak()
+    public async Task SkippedAndAbortedRunsNeitherExtendNorBreakAFailureStreak()
     {
         var store = new InMemoryRunHistoryStore();
 
@@ -35,7 +35,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task Last_success_ignores_later_failures()
+    public async Task LastSuccessIgnoresLaterFailures()
     {
         var store = new InMemoryRunHistoryStore();
 
@@ -47,7 +47,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task The_ring_drops_the_oldest_runs_once_it_is_full()
+    public async Task TheRingDropsTheOldestRunsOnceItIsFull()
     {
         var store = new InMemoryRunHistoryStore(new InMemoryRunHistoryOptions { MaxRunsPerJob = 3 });
 
@@ -64,7 +64,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task Completing_a_run_that_has_already_been_trimmed_is_not_an_error()
+    public async Task CompletingARunThatHasAlreadyBeenTrimmedIsNotAnError()
     {
         var store = new InMemoryRunHistoryStore(new InMemoryRunHistoryOptions { MaxRunsPerJob = 1 });
 
@@ -78,7 +78,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task Queries_filter_by_status_time_and_instance()
+    public async Task QueriesFilterByStatusTimeAndInstance()
     {
         var store = new InMemoryRunHistoryStore();
 
@@ -106,7 +106,7 @@ public class InMemoryRunHistoryStoreTests
     }
 
     [Fact]
-    public async Task Purging_removes_old_runs_but_leaves_running_ones_alone()
+    public async Task PurgingRemovesOldRunsButLeavesRunningOnesAlone()
     {
         var store = new InMemoryRunHistoryStore();
 

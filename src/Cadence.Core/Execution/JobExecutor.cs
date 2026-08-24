@@ -205,10 +205,16 @@ public sealed class JobExecutor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits until nothing is in flight, without signalling shutdown. Used by tests and by the test
-    /// host to make "advance the clock, then assert" deterministic.
+    /// Waits until nothing is in flight, without signalling shutdown.
     /// </summary>
-    internal async Task WaitForIdleAsync()
+    /// <remarks>
+    /// Public alongside <see cref="ActiveRunCount"/> and <see cref="InFlightCount"/>, and for the
+    /// same reason: dispatch is deliberately fire-and-forget, so anything that needs to observe the
+    /// result of a run has no other way to know it has finished. That is what makes "advance the
+    /// clock, then assert" deterministic instead of a sleep, and it is unrelated to shutdown - use
+    /// <see cref="DrainAsync"/> for that.
+    /// </remarks>
+    public async Task WaitForIdleAsync()
     {
         while (true)
         {

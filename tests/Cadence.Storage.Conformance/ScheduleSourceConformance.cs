@@ -28,7 +28,7 @@ public abstract class ScheduleSourceConformance
     protected virtual Task PollAsync(IWritableScheduleSource source) => Task.CompletedTask;
 
     [SkippableFact]
-    public async Task An_upserted_schedule_reads_back_field_for_field()
+    public async Task AnUpsertedScheduleReadsBackFieldForField()
     {
         var source = await CreateAsync();
 
@@ -57,7 +57,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task Absent_overrides_stay_absent()
+    public async Task AbsentOverridesStayAbsent()
     {
         // Null means "defer to what the code declared", which is not the same as any particular
         // value. A source that helpfully filled these in would silently override the job's own
@@ -75,7 +75,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task An_unknown_job_reads_back_as_null()
+    public async Task AnUnknownJobReadsBackAsNull()
     {
         var source = await CreateAsync();
 
@@ -83,7 +83,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task GetAll_returns_every_schedule()
+    public async Task GetAllReturnsEverySchedule()
     {
         var source = await CreateAsync();
 
@@ -98,7 +98,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task GetAll_is_empty_when_nothing_is_configured()
+    public async Task GetAllIsEmptyWhenNothingIsConfigured()
     {
         var source = await CreateAsync();
 
@@ -106,7 +106,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task Upserting_an_existing_job_updates_it_rather_than_duplicating()
+    public async Task UpsertingAnExistingJobUpdatesItRatherThanDuplicating()
     {
         var source = await CreateAsync();
 
@@ -124,7 +124,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task Each_write_advances_the_version()
+    public async Task EachWriteAdvancesTheVersion()
     {
         var source = await CreateAsync();
 
@@ -140,7 +140,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task A_write_against_a_stale_version_is_refused()
+    public async Task AWriteAgainstAStaleVersionIsRefused()
     {
         var source = await CreateAsync();
 
@@ -164,7 +164,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task Version_zero_writes_unconditionally()
+    public async Task VersionZeroWritesUnconditionally()
     {
         // What a caller that never read the row has, and what a source that does not version rows
         // produces. It has to mean "just make it so" or those callers could never write at all.
@@ -180,7 +180,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task A_change_fires_the_token()
+    public async Task AChangeFiresTheToken()
     {
         var source = await CreateAsync();
         var token = source.GetChangeToken();
@@ -194,7 +194,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task A_fired_token_is_replaced_by_a_fresh_one()
+    public async Task AFiredTokenIsReplacedByAFreshOne()
     {
         // Otherwise the first change is the only one an instance ever notices.
         var source = await CreateAsync();
@@ -218,7 +218,7 @@ public abstract class ScheduleSourceConformance
     }
 
     [SkippableFact]
-    public async Task A_registered_callback_runs_on_change()
+    public async Task ARegisteredCallbackRunsOnChange()
     {
         var source = await CreateAsync();
         var fired = 0;

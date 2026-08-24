@@ -36,7 +36,7 @@ public abstract class RunHistoryStoreConformance
     protected virtual Task SettleAsync(IRunHistoryStore store) => Task.CompletedTask;
 
     [SkippableFact]
-    public async Task A_started_run_reads_back_as_running()
+    public async Task AStartedRunReadsBackAsRunning()
     {
         var store = await CreateAsync();
         var runId = Guid.NewGuid();
@@ -54,7 +54,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Completing_a_run_records_status_duration_and_error()
+    public async Task CompletingARunRecordsStatusDurationAndError()
     {
         var store = await CreateAsync();
         var runId = Guid.NewGuid();
@@ -76,7 +76,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Completing_a_run_that_is_gone_is_not_an_error()
+    public async Task CompletingARunThatIsGoneIsNotAnError()
     {
         var store = await CreateAsync();
 
@@ -86,7 +86,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task An_occurrence_is_recorded_against_the_run()
+    public async Task AnOccurrenceIsRecordedAgainstTheRun()
     {
         var store = await CreateAsync();
         var runId = Guid.NewGuid();
@@ -103,7 +103,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Runs_of_other_jobs_are_not_returned()
+    public async Task RunsOfOtherJobsAreNotReturned()
     {
         var store = await CreateAsync();
 
@@ -117,7 +117,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task GetLastRun_returns_null_for_a_job_with_no_history()
+    public async Task GetLastRunReturnsNullForAJobWithNoHistory()
     {
         var store = await CreateAsync();
 
@@ -126,7 +126,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task GetLastRun_returns_the_newest_whatever_its_outcome()
+    public async Task GetLastRunReturnsTheNewestWhateverItsOutcome()
     {
         var store = await CreateAsync();
 
@@ -143,7 +143,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task GetLastSuccess_skips_over_later_failures()
+    public async Task GetLastSuccessSkipsOverLaterFailures()
     {
         var store = await CreateAsync();
 
@@ -161,7 +161,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Progress_entries_read_back_in_order()
+    public async Task ProgressEntriesReadBackInOrder()
     {
         var store = await CreateAsync();
         var runId = Guid.NewGuid();
@@ -193,7 +193,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Consecutive_failures_count_back_to_the_last_success()
+    public async Task ConsecutiveFailuresCountBackToTheLastSuccess()
     {
         var store = await CreateAsync();
 
@@ -206,7 +206,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task A_success_resets_the_failure_streak_to_zero()
+    public async Task ASuccessResetsTheFailureStreakToZero()
     {
         var store = await CreateAsync();
 
@@ -218,7 +218,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task A_job_with_no_history_has_no_failure_streak()
+    public async Task AJobWithNoHistoryHasNoFailureStreak()
     {
         var store = await CreateAsync();
 
@@ -228,7 +228,7 @@ public abstract class RunHistoryStoreConformance
     [SkippableTheory]
     [InlineData(RunStatus.TimedOut)]
     [InlineData(RunStatus.Lost)]
-    public async Task Timed_out_and_lost_runs_extend_the_failure_streak(RunStatus status)
+    public async Task TimedOutAndLostRunsExtendTheFailureStreak(RunStatus status)
     {
         // Both mean the work did not get done. A threshold set on "failures" that ignored them would
         // stay silent through exactly the outages people most want to hear about.
@@ -253,7 +253,7 @@ public abstract class RunHistoryStoreConformance
     [InlineData(RunStatus.Running)]
     [InlineData(RunStatus.Skipped)]
     [InlineData(RunStatus.Aborted)]
-    public async Task Running_skipped_and_aborted_runs_neither_extend_nor_break_the_streak(RunStatus status)
+    public async Task RunningSkippedAndAbortedRunsNeitherExtendNorBreakTheStreak(RunStatus status)
     {
         // None of them says anything about whether the job's own logic is broken: one has not
         // finished, one never started, and one was cut short by a deployment.
@@ -283,7 +283,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_returns_newest_first()
+    public async Task QueryReturnsNewestFirst()
     {
         var store = await CreateAsync();
 
@@ -298,7 +298,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_filters_by_job()
+    public async Task QueryFiltersByJob()
     {
         var store = await CreateAsync();
 
@@ -311,7 +311,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_filters_by_status()
+    public async Task QueryFiltersByStatus()
     {
         var store = await CreateAsync();
 
@@ -325,7 +325,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_filters_by_start_window_inclusive_of_from_and_exclusive_of_to()
+    public async Task QueryFiltersByStartWindowInclusiveOfFromAndExclusiveOfTo()
     {
         var store = await CreateAsync();
 
@@ -342,7 +342,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_filters_by_instance()
+    public async Task QueryFiltersByInstance()
     {
         var store = await CreateAsync();
 
@@ -356,7 +356,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_with_no_job_returns_every_job()
+    public async Task QueryWithNoJobReturnsEveryJob()
     {
         var store = await CreateAsync();
 
@@ -369,7 +369,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Query_pages_with_limit_and_offset()
+    public async Task QueryPagesWithLimitAndOffset()
     {
         var store = await CreateAsync();
 
@@ -391,7 +391,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Purge_removes_finished_runs_older_than_the_cut_off()
+    public async Task PurgeRemovesFinishedRunsOlderThanTheCutOff()
     {
         var store = await CreateAsync();
 
@@ -407,7 +407,7 @@ public abstract class RunHistoryStoreConformance
     }
 
     [SkippableFact]
-    public async Task Purge_leaves_a_running_run_alone_however_old_it_is()
+    public async Task PurgeLeavesARunningRunAloneHoweverOldItIs()
     {
         // Deleting it would hide an abandoned run rather than surface it. Resolving that case is the
         // janitor's job, and it needs the row to still be there to do it.
