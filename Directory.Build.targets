@@ -1,0 +1,15 @@
+<Project>
+
+  <!--
+    Imported after the project file, so $(IsPackable) is already set. Directory.Build.props runs
+    before it and cannot see the value.
+
+    Directory.Build.props declares PackageReadmeFile, which is only half the job: the file also has
+    to be packed. Without this the pack fails with NU5039 — which is exactly the kind of mistake the
+    package-consuming sample exists to surface.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

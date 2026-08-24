@@ -1,0 +1,236 @@
+using System.Diagnostics.Metrics;
+using Cadence.Diagnostics;
+using Cadence.Execution;
+using Cadence.Scheduling;
+using Cadence.Storage;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+namespace Cadence.Core.Tests;
+
+public class JobExecutorTests
+{
+    private static readonly RunSettings Default = new() { Overlap = OverlapPolicy.Skip };
+
+    [Fact]
+    public async Task A_successful_run_is_recorded_as_succeeded()
+    {
+        await using var fixture = Fixture.Create();
+
+        var result = await fixture.DispatchAsync<SucceedingJob>(Default);
+        await fixture.Executor.WaitForIdleAsync();
+
+        Assert.True(result.WasStarted);
+
+        var run = await fixture.History.GetLastRunAsync("job", CancellationToken.None);
+        Assert.Equal(RunStatus.Succeeded, run!.Status);
+        Assert.Equal(result.RunId, run.RunId);
+        Assert.NotNull(run.CompletedAt);
+    }
+
+    [Fact]
+    public async Task A_throwing_job_is_recorded_as_failed_with_the_exception()
+    {
+        await using var fixture = Fixture.Create();
+
+        await fixture.DispatchAsync<FailingJob>(Default);
+        await fixture.Executor.WaitForIdleAsync();
+
+        var run = await fixture.History.GetLastRunAsync("job", CancellationToken.None);
+        Assert.Equal(RunStatus.Failed, run!.Status);
+        Assert.Contains("the invoice service is unreachable", run.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Exceeding_the_maximum_duration_is_recorded_as_timed_out_not_aborted()
+    {
+        await using var fixture = Fixture.Create();
+
+        await fixture.DispatchAsync<NeverEndingJob>(
+            new RunSettings { Overlap = OverlapPolicy.Skip, MaxDuration = TimeSpan.FromMilliseconds(50) });
+
+        await fixture.Executor.WaitForIdleAsync();
+
+        var run = await fixture.History.GetLastRunAsync("job", CancellationToken.None);
+
+        // The distinction matters: TimedOut says the job is slow, Aborted says the host is churning.
+        Assert.Equal(RunStatus.TimedOut, run!.Status);
+    }
+
+    [Fact]
+    public async Task Shutdown_records_an_in_flight_run_as_aborted()
+    {
+        await using var fixture = Fixture.Create();
+
+        await fixture.DispatchAsync<NeverEndingJob>(Default);
+        await fixture.Executor.DrainAsync(TimeSpan.FromSeconds(5));
+
+        var run = await fixture.History.GetLastRunAsync("job", CancellationToken.None);
+        Assert.Equal(RunStatus.Aborted, run!.Status);
+    }
+
+    [Fact]
+    public async Task Skip_policy_records_the_second_occurrence_as_skipped_with_a_reason()
+    {
+        await using var fixture = Fixture.Create();
+
+        var first = await fixture.DispatchAsync<GatedJob>(Default);
+        var second = await fixture.DispatchAsync<GatedJob>(Default);
+
+        Assert.True(first.WasStarted);
+        Assert.False(second.WasStarted);
+        Assert.Contains("overlap policy is Skip", second.SkipReason, StringComparison.Ordinal);
+
+        fixture.Spy.Gate.SetResult();
+        await fixture.Executor.WaitForIdleAsync();
+
+        var runs = await fixture.History.QueryAsync(new RunQuery { JobName = "job" }, CancellationToken.None);
+        var skipped = runs.Single(r => r.Status == RunStatus.Skipped);
+
+        // The reason is stored, not just logged: a gap in the schedule has to be explainable.
+        Assert.Contains("already in flight", Assert.Single(skipped.Log).Message, StringComparison.Ordinal);
+        Assert.Equal(1, fixture.Spy.Started);
+    }
+
+    [Fact]
+    public async Task AllowConcurrent_starts_a_second_run_in_a_scope_of_its_own()
+    {
+        await using var fixture = Fixture.Create();
+        var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
+
+        await fixture.DispatchAsync<GatedJob>(settings);
+        await fixture.DispatchAsync<GatedJob>(settings);
+
+        // Both are gated, so both are provably in flight at the same moment.
+        Assert.Equal(2, fixture.Executor.ActiveRunCount);
+        Assert.Equal(2, fixture.Executor.InFlightCount("job"));
+
+        fixture.Spy.Gate.SetResult();
+        await fixture.Executor.WaitForIdleAsync();
+
+        // Concurrent runs of the same job do NOT share scoped state. Counter-intuitive, and exactly
+        // why it is worth pinning down.
+        Assert.Equal(2, fixture.Spy.ObservedScopeIds.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task The_per_instance_concurrency_cap_skips_rather_than_queues()
+    {
+        await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
+        var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
+
+        await fixture.DispatchAsync<GatedJob>(settings);
+        var blocked = await fixture.DispatchAsync<GatedJob>(settings);
+
+        Assert.False(blocked.WasStarted);
+        Assert.Contains("concurrency limit", blocked.SkipReason, StringComparison.Ordinal);
+        Assert.Contains("MaxConcurrentRuns", blocked.SkipReason, StringComparison.Ordinal);
+
+        fixture.Spy.Gate.SetResult();
+        await fixture.Executor.WaitForIdleAsync();
+    }
+
+    [Fact]
+    public async Task Capacity_is_released_when_a_run_finishes()
+    {
+        await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
+
+        await fixture.DispatchAsync<SucceedingJob>(Default);
+        await fixture.Executor.WaitForIdleAsync();
+
+        var second = await fixture.DispatchAsync<SucceedingJob>(Default);
+        await fixture.Executor.WaitForIdleAsync();
+
+        Assert.True(second.WasStarted);
+        Assert.Equal(0, fixture.Executor.ActiveRunCount);
+    }
+
+    [Fact]
+    public async Task Reported_progress_lands_in_run_history()
+    {
+        await using var fixture = Fixture.Create();
+
+        var result = await fixture.DispatchAsync<ReportingJob>(Default);
+        await fixture.Executor.WaitForIdleAsync();
+
+        // The sink writes without blocking the job, so give the append a moment to land.
+        JobRun? run = null;
+        for (var attempt = 0; attempt < 50 && (run?.Log.Count ?? 0) == 0; attempt++)
+        {
+            run = await fixture.History.GetLastRunAsync("job", CancellationToken.None);
+            if (run!.Log.Count == 0)
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        Assert.Equal(result.RunId, run!.RunId);
+        var entry = Assert.Single(run.Log);
+        Assert.Equal("processed 400 of 12000", entry.Message);
+        Assert.Equal(400, Assert.IsType<int>(entry.Data!["done"]));
+    }
+
+    private sealed class Fixture : IAsyncDisposable
+    {
+        private ServiceProvider _provider = null!;
+
+        public JobExecutor Executor { get; private set; } = null!;
+
+        public InMemoryRunHistoryStore History { get; } = new();
+
+        public JobSpy Spy { get; } = new();
+
+        public static Fixture Create(Action<CadenceOptions>? configureOptions = null)
+        {
+            var fixture = new Fixture();
+
+            var services = new ServiceCollection();
+            services.AddMetrics();
+            services.AddSingleton(fixture.Spy);
+            services.AddScoped<ScopeMarker>();
+            services.AddTransient<SucceedingJob>();
+            services.AddTransient<FailingJob>();
+            services.AddTransient<GatedJob>();
+            services.AddTransient<NeverEndingJob>();
+            services.AddTransient<ReportingJob>();
+
+            fixture._provider = services.BuildServiceProvider();
+
+            var clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 2, 0));
+            var options = new CadenceOptions { InstanceId = "test:1:aaaaaaaa" };
+            configureOptions?.Invoke(options);
+
+            var metrics = new CadenceMetrics(fixture._provider.GetRequiredService<IMeterFactory>());
+
+            fixture.Executor = new JobExecutor(
+                fixture._provider.GetRequiredService<IServiceScopeFactory>(),
+                fixture.History,
+                new RunHistoryProgressSink(fixture.History, clock, NullLogger<RunHistoryProgressSink>.Instance),
+                clock,
+                metrics,
+                Options.Create(options),
+                NullLogger<JobExecutor>.Instance);
+
+            return fixture;
+        }
+
+        public Task<DispatchResult> DispatchAsync<TJob>(RunSettings settings)
+            where TJob : IJob
+            => Executor.DispatchAsync(
+                new JobDescriptor { Name = "job", ImplementationType = typeof(TJob) },
+                settings,
+                scheduledFor: null,
+                TriggerKind.Manual,
+                payload: null,
+                CancellationToken.None);
+
+        public async ValueTask DisposeAsync()
+        {
+            Spy.Gate.TrySetResult();
+            await Executor.DisposeAsync();
+            await _provider.DisposeAsync();
+        }
+    }
+}

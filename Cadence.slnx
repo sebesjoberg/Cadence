@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cadence.Abstractions/Cadence.Abstractions.csproj" />
+    <Project Path="src/Cadence.Core/Cadence.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cadence.Core.Tests/Cadence.Core.Tests.csproj" />
+  </Folder>
+</Solution>

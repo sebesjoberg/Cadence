@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Cadence.Sample.Worker</RootNamespace>
+    <!-- The sample should read like consumer code, and a consumer writes logger.LogInformation(...)
+         rather than a source-generated LoggerMessage. Cadence's own assemblies still enforce both
+         of these; a sample that enforced them would be teaching the wrong lesson. -->
+    <NoWarn>$(NoWarn);CA1848;CA1873</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    Cadence comes from the local package feed (see ../NuGet.config), built by
+    ../../scripts/pack.ps1. Version floats within 0.1.* so the sample keeps working as the alpha
+    iterates without an edit here every time.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Cadence.Core" Version="0.1.*-*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+  </ItemGroup>
+
+  <!-- The point of the sample: prove all three telemetry paths at once. -->
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.18.0" />
+  </ItemGroup>
+
+</Project>

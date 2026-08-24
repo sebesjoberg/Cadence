@@ -1,0 +1,276 @@
+using System.Diagnostics.Metrics;
+using Cadence.Diagnostics;
+using Cadence.Execution;
+using Cadence.Scheduling;
+using Cadence.Storage;
+using Cadence.Validation;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+namespace Cadence.Core.Tests;
+
+/// <summary>
+/// Drives the tick loop with a fake clock. Nothing here sleeps, and nothing depends on a real
+/// timer firing.
+/// </summary>
+public class SchedulingTests
+{
+    private const string Hourly = "0 * * * *";
+
+    [Fact]
+    public async Task Nothing_runs_before_an_occurrence_is_due()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();                            // 10:30 — seeds the evaluation point
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(20));   // 10:50
+
+        Assert.Empty(await host.RunsAsync());
+    }
+
+    [Fact]
+    public async Task A_due_occurrence_runs_exactly_once()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));   // 11:00 is now due
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(1));    // and must not run again
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(RunStatus.Succeeded, run.Status);
+        Assert.Equal(TriggerKind.Schedule, run.Trigger);
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 11, 0), run.ScheduledFor);
+    }
+
+    [Fact]
+    public async Task The_claim_is_taken_for_the_occurrence_instant_not_the_current_time()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30) + TimeSpan.FromSeconds(4));
+
+        // The tick noticed at 11:00:04 but the claim key must be the occurrence, so two instances
+        // whose clocks differ still contend for the same slot.
+        var attempt = Assert.Single(host.Coordinator.Attempts);
+        Assert.Equal("scheduled-job", attempt.JobName);
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 11, 0), attempt.Occurrence);
+    }
+
+    [Fact]
+    public async Task Losing_the_claim_means_no_run_and_no_history_row()
+    {
+        await using var host = TickHost.Create(Hourly, grantClaims: false);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        Assert.Single(host.Coordinator.Attempts);
+        Assert.Empty(await host.RunsAsync());
+    }
+
+    [Fact]
+    public async Task A_disabled_job_does_not_run()
+    {
+        await using var host = TickHost.Create(Hourly, enabled: false);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromHours(3));
+
+        Assert.Empty(await host.RunsAsync());
+        Assert.Empty(host.Coordinator.Attempts);
+    }
+
+    [Fact]
+    public async Task Re_enabling_a_job_does_not_replay_the_period_it_was_disabled_for()
+    {
+        await using var host = TickHost.Create(Hourly, enabled: false, onMissed: MissedRunPolicy.RunAll);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromHours(5));      // 15:30, still disabled
+
+        host.Source.SetEnabled("scheduled-job", enabled: true);
+
+        // Past the config poll interval, so the tick picks the change up.
+        await host.AdvanceAndTickAsync(TimeSpan.FromSeconds(30));   // 15:30:30
+
+        // Deliberate deviation from a literal reading of the spec: a disabled job's occurrences are
+        // treated as never having existed. Replaying five hours of runs because someone toggled a
+        // checkbox is a footgun even with the catch-up cap.
+        Assert.Empty(await host.RunsAsync());
+
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));   // 16:00:30 — one occurrence due
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 16, 0), run.ScheduledFor);
+    }
+
+    [Fact]
+    public async Task A_stored_cron_expression_overrides_the_code_default()
+    {
+        // The code default is hourly; the store says every 15 minutes.
+        await using var host = TickHost.Create(Hourly, storedCron: "*/15 * * * *");
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(15));   // 10:45
+
+        Assert.Single(await host.RunsAsync());
+    }
+
+    [Fact]
+    public async Task One_job_with_an_unusable_expression_does_not_stop_the_others()
+    {
+        await using var host = TickHost.Create(Hourly, secondJobCron: "definitely not cron");
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        var runs = await host.RunsAsync();
+        Assert.All(runs, r => Assert.Equal("scheduled-job", r.JobName));
+        Assert.Single(runs);
+    }
+
+    [Fact]
+    public async Task A_tick_that_spans_several_occurrences_applies_the_missed_run_policy()
+    {
+        await using var host = TickHost.Create(Hourly, onMissed: MissedRunPolicy.RunOnce);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromHours(4));      // 14:30: 11:00-14:00 all due
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 14, 0), run.ScheduledFor);
+    }
+
+    private sealed class TickHost : IAsyncDisposable
+    {
+        private ServiceProvider _provider = null!;
+        private CadenceHostedService _service = null!;
+        private JobExecutor _executor = null!;
+        private FakeClock _clock = null!;
+
+        public MutableScheduleSource Source { get; } = new();
+
+        public ScriptedCoordinator Coordinator { get; private set; } = null!;
+
+        public InMemoryRunHistoryStore History { get; } = new();
+
+        public static TickHost Create(
+            string codeCron,
+            string? storedCron = null,
+            bool enabled = true,
+            bool grantClaims = true,
+            MissedRunPolicy onMissed = MissedRunPolicy.SkipToNext,
+            string? secondJobCron = null)
+        {
+            var host = new TickHost
+            {
+                Coordinator = new ScriptedCoordinator(grantClaims),
+                _clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 10, 30)),
+            };
+
+            var descriptors = new List<JobDescriptor>
+            {
+                new()
+                {
+                    Name = "scheduled-job",
+                    ImplementationType = typeof(SucceedingJob),
+                    DefaultCron = codeCron,
+                    OnMissed = onMissed,
+                },
+            };
+
+            host.Source.Set(new JobSchedule
+            {
+                JobName = "scheduled-job",
+                CronExpression = storedCron ?? codeCron,
+                TimeZoneId = "UTC",
+                Enabled = enabled,
+            });
+
+            if (secondJobCron is not null)
+            {
+                descriptors.Add(new JobDescriptor
+                {
+                    Name = "broken-job",
+                    ImplementationType = typeof(ReportingJob),
+                    DefaultCron = secondJobCron,
+                });
+            }
+
+            var services = new ServiceCollection();
+            services.AddMetrics();
+            services.AddSingleton(new JobSpy());
+            services.AddScoped<ScopeMarker>();
+            services.AddTransient<SucceedingJob>();
+            services.AddTransient<ReportingJob>();
+            host._provider = services.BuildServiceProvider();
+
+            var registry = new JobRegistry(descriptors);
+            var options = Options.Create(new CadenceOptions
+            {
+                InstanceId = "test:1:aaaaaaaa",
+                ConfigPollInterval = TimeSpan.FromSeconds(15),
+            });
+
+            var metrics = new CadenceMetrics(host._provider.GetRequiredService<IMeterFactory>());
+            var scopeFactory = host._provider.GetRequiredService<IServiceScopeFactory>();
+
+            host._executor = new JobExecutor(
+                scopeFactory,
+                host.History,
+                new RunHistoryProgressSink(host.History, host._clock, NullLogger<RunHistoryProgressSink>.Instance),
+                host._clock,
+                metrics,
+                options,
+                NullLogger<JobExecutor>.Instance);
+
+            var resolver = new ScheduleResolver(registry, host.Source);
+
+            host._service = new CadenceHostedService(
+                registry,
+                resolver,
+                host.Source,
+                host.Coordinator,
+                host.History,
+                host._executor,
+                new JobGraphValidator(
+                    registry,
+                    scopeFactory,
+                    new RegistrationDiagnostics([]),
+                    options,
+                    NullLogger<JobGraphValidator>.Instance),
+                new LastSuccessCache(host._clock),
+                host._clock,
+                metrics,
+                options,
+                NullLogger<CadenceHostedService>.Instance);
+
+            return host;
+        }
+
+        public async Task TickAsync()
+        {
+            await _service.TickAsync(_clock.UtcNow, CancellationToken.None);
+            await _executor.WaitForIdleAsync();
+        }
+
+        public async Task AdvanceAndTickAsync(TimeSpan by)
+        {
+            _clock.Advance(by);
+            await TickAsync();
+        }
+
+        public async Task<IReadOnlyList<JobRun>> RunsAsync()
+            => await History.QueryAsync(new RunQuery { Limit = 100 }, CancellationToken.None);
+
+        public async ValueTask DisposeAsync()
+        {
+            await _executor.DisposeAsync();
+            await _provider.DisposeAsync();
+        }
+    }
+}

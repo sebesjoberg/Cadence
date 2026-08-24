@@ -65,3 +65,6 @@ secrets.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+## Working design notes — kept local, not part of the shipped repo
+docs/
