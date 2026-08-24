@@ -23,11 +23,15 @@ internal sealed class ScriptedCoordinator : IOccurrenceCoordinator
 
     public ScriptedCoordinator(Func<string, DateTimeOffset, bool> decide) => _decide = decide;
 
-    public List<(string JobName, DateTimeOffset Occurrence)> Attempts { get; } = [];
+    public List<(string JobName, DateTimeOffset Occurrence, Guid RunId)> Attempts { get; } = [];
 
-    public Task<bool> TryClaimAsync(string jobName, DateTimeOffset scheduledFor, CancellationToken ct)
+    public Task<bool> TryClaimAsync(
+        string jobName,
+        DateTimeOffset scheduledFor,
+        Guid runId,
+        CancellationToken ct)
     {
-        Attempts.Add((jobName, scheduledFor));
+        Attempts.Add((jobName, scheduledFor, runId));
         return Task.FromResult(_decide(jobName, scheduledFor));
     }
 }

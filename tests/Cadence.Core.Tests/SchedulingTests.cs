@@ -61,6 +61,38 @@ public class SchedulingTests
     }
 
     [Fact]
+    public async Task The_run_is_recorded_under_the_id_the_claim_was_taken_with()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        // A store where the claim and the run are the same row depends on this: if the executor
+        // invented its own id after the claim, the two writes would collide on the occurrence.
+        var attempt = Assert.Single(host.Coordinator.Attempts);
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(attempt.RunId, run.RunId);
+        Assert.NotEqual(Guid.Empty, attempt.RunId);
+    }
+
+    [Fact]
+    public async Task A_skipped_occurrence_is_recorded_under_the_claimed_id()
+    {
+        await using var host = TickHost.Create(Hourly, maxConcurrentRuns: 0);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        // The claim already consumed the slot, so the skip record has to reuse its identity rather
+        // than introduce a second one for the same occurrence.
+        var attempt = Assert.Single(host.Coordinator.Attempts);
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(RunStatus.Skipped, run.Status);
+        Assert.Equal(attempt.RunId, run.RunId);
+    }
+
+    [Fact]
     public async Task Losing_the_claim_means_no_run_and_no_history_row()
     {
         await using var host = TickHost.Create(Hourly, grantClaims: false);
@@ -164,7 +196,8 @@ public class SchedulingTests
             bool enabled = true,
             bool grantClaims = true,
             MissedRunPolicy onMissed = MissedRunPolicy.SkipToNext,
-            string? secondJobCron = null)
+            string? secondJobCron = null,
+            int? maxConcurrentRuns = null)
         {
             var host = new TickHost
             {
@@ -214,6 +247,9 @@ public class SchedulingTests
             {
                 InstanceId = "test:1:aaaaaaaa",
                 ConfigPollInterval = TimeSpan.FromSeconds(15),
+                // Zero is below what Validate() allows, which is the point: it forces the capacity
+                // gate without the test having to start a long-running job first.
+                MaxConcurrentRuns = maxConcurrentRuns ?? 20,
             });
 
             var metrics = new CadenceMetrics(host._provider.GetRequiredService<IMeterFactory>());

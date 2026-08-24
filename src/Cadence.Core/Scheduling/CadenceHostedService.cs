@@ -187,8 +187,13 @@ internal sealed class CadenceHostedService : BackgroundService
 
         foreach (var occurrence in plan.Occurrences)
         {
+            // Assigned before the claim, not after it, so that a store which records the claim and
+            // the run as one row has the id it needs, and so a claim whose acknowledgement was lost
+            // can be retried and recognised as ours. See IOccurrenceCoordinator.TryClaimAsync.
+            var runId = Guid.NewGuid();
+
             var claimed = await _coordinator
-                .TryClaimAsync(schedule.Descriptor.Name, occurrence, cancellationToken)
+                .TryClaimAsync(schedule.Descriptor.Name, occurrence, runId, cancellationToken)
                 .ConfigureAwait(false);
 
             if (!claimed)
@@ -209,7 +214,8 @@ internal sealed class CadenceHostedService : BackgroundService
                 occurrence,
                 TriggerKind.Schedule,
                 payload: null,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                runId).ConfigureAwait(false);
         }
     }
 

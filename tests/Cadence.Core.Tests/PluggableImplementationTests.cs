@@ -98,7 +98,11 @@ public class PluggableImplementationTests
 /// <summary>Someone's own coordinator: constructible by the container, no Cadence internals needed.</summary>
 internal sealed class CustomCoordinator : IOccurrenceCoordinator
 {
-    public Task<bool> TryClaimAsync(string jobName, DateTimeOffset scheduledFor, CancellationToken ct)
+    public Task<bool> TryClaimAsync(
+        string jobName,
+        DateTimeOffset scheduledFor,
+        Guid runId,
+        CancellationToken ct)
         => Task.FromResult(true);
 }
 

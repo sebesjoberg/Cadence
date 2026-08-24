@@ -91,13 +91,20 @@ public sealed class JobExecutor : IAsyncDisposable
     /// <param name="trigger">What started the run.</param>
     /// <param name="payload">Optional payload from an API trigger.</param>
     /// <param name="cancellationToken">Cancels the history writes, not the run.</param>
+    /// <param name="runId">
+    /// The id to record the run under. Supplied by the tick loop, which assigns it before claiming
+    /// the occurrence so that the claim and the run are the same identity — a store that records
+    /// both as one row would otherwise see the claim's row and this one collide on the occurrence.
+    /// Null for triggers that never claim, where a fresh id is generated here.
+    /// </param>
     public async Task<DispatchResult> DispatchAsync(
         JobDescriptor descriptor,
         RunSettings settings,
         DateTimeOffset? scheduledFor,
         TriggerKind trigger,
         JsonElement? payload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? runId = null)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(settings);
@@ -130,15 +137,20 @@ public sealed class JobExecutor : IAsyncDisposable
             }
         }
 
+        // The claimed id is reused for the skip record, not replaced by a fresh one. The claim has
+        // already consumed this occurrence, so a second identity for the same slot would collide
+        // with it in any store that enforces one row per occurrence.
+        var effectiveRunId = runId ?? Guid.NewGuid();
+
         if (skipReason is not null)
         {
-            await RecordSkippedAsync(descriptor, scheduledFor, trigger, skipReason, cancellationToken)
+            await RecordSkippedAsync(
+                descriptor, scheduledFor, trigger, skipReason, effectiveRunId, cancellationToken)
                 .ConfigureAwait(false);
 
             return DispatchResult.Skipped(skipReason);
         }
 
-        var runId = Guid.NewGuid();
         var startedAt = _clock.UtcNow;
 
         try
@@ -146,7 +158,7 @@ public sealed class JobExecutor : IAsyncDisposable
             await _history.StartAsync(
                 new JobRunStart
                 {
-                    RunId = runId,
+                    RunId = effectiveRunId,
                     JobName = descriptor.Name,
                     ScheduledFor = scheduledFor,
                     Trigger = trigger,
@@ -164,7 +176,7 @@ public sealed class JobExecutor : IAsyncDisposable
         var context = new JobContext(_progress)
         {
             JobName = descriptor.Name,
-            RunId = runId,
+            RunId = effectiveRunId,
             ScheduledFor = scheduledFor,
             StartedAt = startedAt,
             Trigger = trigger,
@@ -177,19 +189,19 @@ public sealed class JobExecutor : IAsyncDisposable
             () => ExecuteAsync(descriptor, settings, context, startedAt),
             CancellationToken.None);
 
-        _inFlight[runId] = new InFlightRun(runId, descriptor.Name, startedAt, runTask);
+        _inFlight[effectiveRunId] = new InFlightRun(effectiveRunId, descriptor.Name, startedAt, runTask);
 
         _ = runTask.ContinueWith(
             completed =>
             {
-                _inFlight.TryRemove(runId, out _);
+                _inFlight.TryRemove(effectiveRunId, out _);
                 Release(descriptor.Name);
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-        return DispatchResult.Started(runId);
+        return DispatchResult.Started(effectiveRunId);
     }
 
     /// <summary>
@@ -361,9 +373,9 @@ public sealed class JobExecutor : IAsyncDisposable
         DateTimeOffset? scheduledFor,
         TriggerKind trigger,
         string reason,
+        Guid runId,
         CancellationToken cancellationToken)
     {
-        var runId = Guid.NewGuid();
         var now = _clock.UtcNow;
 
         try
