@@ -10,9 +10,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!-- Package metadata. Nothing is published until v0.1 is complete. -->
+  <!-- Package metadata. Nothing is published until the milestones settle. -->
   <PropertyGroup>
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.2.0</VersionPrefix>
     <VersionSuffix>alpha</VersionSuffix>
     <Authors>Cadence contributors</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

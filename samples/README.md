@@ -47,13 +47,24 @@ Activity.Events:
 
 The fuller sample — .NET Aspire orchestrating a SQL Server container, Cadence using the SQL
 schedule source and occurrence coordinator, two worker replicas contending for the same
-occurrences, and the dashboard rendering run history — needs two things that do not exist:
+occurrences, and the dashboard rendering run history — was blocked on two things. One has landed:
 
-- `Cadence.Storage.Sql` (**v0.2**) — the unique-index claim, persistent history, the janitor
-- `Cadence.Dashboard` (**v0.4**) — somewhere for the history sink to actually be read
+| Blocker | Milestone | Status |
+|---|---|---|
+| `Cadence.Storage.Sql` — the unique-index claim, persistent history, the janitor | v0.2 | **done** |
+| `Cadence.Dashboard` — somewhere for the history sink to actually be read | v0.4 | outstanding |
 
-Until then this sample uses the in-memory stores and the no-op coordinator, so it demonstrates the
-scheduling, execution and telemetry paths but not clustering or the UI. The Aspire host is worth
-adding as soon as v0.2 lands: two replicas plus a real coordinator is the only way to actually
-prove the claim semantics, and a test that asserts "N replicas, one run per occurrence" belongs
-there rather than in unit tests.
+This sample still uses the in-memory stores and the no-op coordinator, so it demonstrates the
+scheduling, execution and telemetry paths but not clustering or the UI.
+
+**The clustering guarantee is proven, just not here.** `ClusteredSchedulingTests` runs five
+independent instances — separate containers, separate executors, separate instance ids, one
+Testcontainers database — against the real tick loop with a fake clock, and asserts one run per
+occurrence. That is the "N replicas, one run per occurrence" test, and driving the loop directly
+makes it deterministic in a way an Aspire host never would be.
+
+What Aspire would add on top is the things a test cannot show: real processes, real restarts, and
+a dashboard to look at. Worth building once v0.4 gives it something to render. When it is built,
+two replicas will expose the `Skip` caveat immediately — a long-running job on replica A, the next
+occurrence claimed by replica B, and the job runs anyway. Better to see that in a sample we control
+than in someone's incident.

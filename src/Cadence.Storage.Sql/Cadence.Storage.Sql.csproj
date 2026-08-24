@@ -19,12 +19,25 @@
   </ItemGroup>
 
   <!--
-    The schema scripts ship inside the assembly so the migrator has no file-system dependency, and
-    are mirrored into scripts/sql/ by a target below for DBAs who apply them by hand.
+    The schema scripts ship inside the assembly, so the migrator has no file-system dependency.
   -->
   <ItemGroup>
-    <EmbeddedResource Include="Scripts\*.sql" />
+    <SchemaScript Include="Scripts\*.sql" />
+    <EmbeddedResource Include="@(SchemaScript)" />
   </ItemGroup>
+
+  <!--
+    And are mirrored into scripts/sql/ for anyone applying them by hand with AutoMigrate off. Copied
+    by a target rather than checked in twice, so the reviewable copy cannot drift from the one that
+    actually runs. Skipped outside the repository, where there is nowhere to copy to.
+  -->
+  <Target Name="MirrorSchemaScripts"
+          AfterTargets="Build"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\scripts')">
+    <Copy SourceFiles="@(SchemaScript)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\scripts\sql"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Cadence.Storage.Sql.Tests" />

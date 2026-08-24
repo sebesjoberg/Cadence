@@ -14,11 +14,16 @@
 
   <!--
     Cadence comes from the local package feed (see ../NuGet.config), built by
-    ../../scripts/pack.ps1. Version floats within 0.1.* so the sample keeps working as the alpha
+    ../../scripts/pack.ps1. Version floats within 0.2.* so the sample keeps working as the alpha
     iterates without an edit here every time.
+
+    Still Cadence.Core alone, not Cadence.Storage.Sql: this sample exists to prove the telemetry
+    fan-out, and it does that on the zero-infrastructure path. The SQL tier is exercised by
+    Cadence.Storage.Sql.Tests, and the sample that would show it off needs a dashboard to render
+    the history; see samples/README.md.
   -->
   <ItemGroup>
-    <PackageReference Include="Cadence.Core" Version="0.1.*-*" />
+    <PackageReference Include="Cadence.Core" Version="0.2.*-*" />
   </ItemGroup>
 
   <ItemGroup>
