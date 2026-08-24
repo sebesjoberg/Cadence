@@ -5,6 +5,8 @@
     <Project Path="src/Cadence.Storage.Sql/Cadence.Storage.Sql.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Cadence.Storage.Conformance/Cadence.Storage.Conformance.csproj" />
     <Project Path="tests/Cadence.Core.Tests/Cadence.Core.Tests.csproj" />
+    <Project Path="tests/Cadence.Storage.Sql.Tests/Cadence.Storage.Sql.Tests.csproj" />
   </Folder>
 </Solution>

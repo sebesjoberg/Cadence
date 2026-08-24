@@ -46,7 +46,7 @@ BEGIN
         RunId           UNIQUEIDENTIFIER NOT NULL,
         JobName         NVARCHAR(200)    NOT NULL,
         ScheduledForUtc DATETIME2(3)     NULL,
-        Trigger         TINYINT          NOT NULL,
+        [Trigger]       TINYINT          NOT NULL,   -- bracketed: TRIGGER is a reserved keyword
         Status          TINYINT          NOT NULL,
         InstanceId      NVARCHAR(200)    NOT NULL,
         StartedAtUtc    DATETIME2(3)     NOT NULL,

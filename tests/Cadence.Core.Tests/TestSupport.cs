@@ -36,7 +36,14 @@ internal sealed class ScriptedCoordinator : IOccurrenceCoordinator
     }
 }
 
-/// <summary>A schedule store the test edits, standing in for the SQL source.</summary>
+/// <summary>
+/// A schedule store the test edits, standing in for the SQL source.
+/// </summary>
+/// <remarks>
+/// Held to the same contract as the real thing by <c>MutableScheduleSourceConformanceTests</c>,
+/// including optimistic concurrency. A double that was laxer than the source it stands in for would
+/// make every test built on it worth less than it looks.
+/// </remarks>
 internal sealed class MutableScheduleSource : IWritableScheduleSource, IDisposable
 {
     private readonly Dictionary<string, JobSchedule> _rows = new(StringComparer.Ordinal);
@@ -50,15 +57,27 @@ internal sealed class MutableScheduleSource : IWritableScheduleSource, IDisposab
 
     public Task UpsertAsync(JobSchedule schedule, CancellationToken ct)
     {
+        // Version zero means the caller never read the row, so it writes unconditionally. Any other
+        // value has to match what is stored, or someone else has edited it since.
+        if (_rows.TryGetValue(schedule.JobName, out var existing)
+            && schedule.Version != 0
+            && schedule.Version != existing.Version)
+        {
+            throw new ScheduleConflictException(schedule.JobName, schedule.Version, existing.Version);
+        }
+
         Set(schedule);
         return Task.CompletedTask;
     }
 
     public IChangeToken GetChangeToken() => new CancellationChangeToken(_changed.Token);
 
+    /// <summary>Writes a schedule with no concurrency check, and signals the change.</summary>
     public void Set(JobSchedule schedule)
     {
-        _rows[schedule.JobName] = schedule;
+        var version = _rows.TryGetValue(schedule.JobName, out var existing) ? existing.Version : 0;
+
+        _rows[schedule.JobName] = schedule with { Version = version + 1 };
 
         var previous = _changed;
         _changed = new CancellationTokenSource();

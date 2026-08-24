@@ -120,7 +120,7 @@ public sealed class SqlOccurrenceCoordinator : IOccurrenceCoordinator
         // only a scheduled occurrence has an instant for two instances to contend over.
         var sql = $"""
             INSERT INTO {_database.Table("CadenceJobRun")}
-                (RunId, JobName, ScheduledForUtc, Trigger, Status, InstanceId, StartedAtUtc)
+                (RunId, JobName, ScheduledForUtc, [Trigger], Status, InstanceId, StartedAtUtc)
             VALUES
                 (@RunId, @JobName, @ScheduledForUtc, @Trigger, @Status, @InstanceId, @StartedAtUtc);
             """;

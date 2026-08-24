@@ -48,7 +48,7 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
         // cost a round trip on the hot path.
         var sql = $"""
             UPDATE {table}
-            SET Trigger      = @Trigger,
+            SET [Trigger]    = @Trigger,
                 Status       = @Status,
                 InstanceId   = @InstanceId,
                 StartedAtUtc = @StartedAtUtc
@@ -57,7 +57,7 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
             IF @@ROWCOUNT = 0
             BEGIN
                 INSERT INTO {table}
-                    (RunId, JobName, ScheduledForUtc, Trigger, Status, InstanceId, StartedAtUtc)
+                    (RunId, JobName, ScheduledForUtc, [Trigger], Status, InstanceId, StartedAtUtc)
                 VALUES
                     (@RunId, @JobName, @ScheduledForUtc, @Trigger, @Status, @InstanceId, @StartedAtUtc);
             END
@@ -493,7 +493,7 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
     }
 
     private const string RunColumns = """
-        RunId, JobName, ScheduledForUtc, Trigger, Status, InstanceId,
+        RunId, JobName, ScheduledForUtc, [Trigger], Status, InstanceId,
         StartedAtUtc, CompletedAtUtc, DurationMs, Error
         """;
 

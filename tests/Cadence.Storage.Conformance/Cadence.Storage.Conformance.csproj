@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Cadence.Storage.Conformance</RootNamespace>
+    <!-- Same waivers as the other test projects: test code may log casually, name methods with
+         underscores and skip ConfigureAwait. Every compiler warning is still an error. -->
+    <NoWarn>$(NoWarn);CA1848;CA1707;CA2007;CA1861;CA1812;CA1515</NoWarn>
+    <!-- This project holds abstract test classes for others to inherit, so it must not itself be
+         collected as a test assembly. -->
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <!-- xunit 2.x reads Skip from attribute metadata, not from a constructed attribute, so a
+         backend-dependent skip needs a runner that understands one thrown at runtime. That is what
+         SkippableFact provides, and it is why the conformance facts are [SkippableFact]. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cadence.Abstractions\Cadence.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
