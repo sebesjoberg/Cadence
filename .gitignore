@@ -1,0 +1,67 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+
+## Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+BenchmarkDotNet.Artifacts/
+
+## NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!packages/build/
+*.nuget.props
+*.nuget.targets
+
+## MSBuild / ReSharper / other tooling
+*.binlog
+msbuild.log
+msbuild.err
+msbuild.wrn
+_ReSharper*/
+*.DotSettings.user
+.dotnet/
+.tools/
+
+## Publish / deployment
+publish/
+*.publishsettings
+PublishScripts/
+*.[Pp]ublish.xml
+*.azurePubxml
+
+## Local configuration and secrets — never commit
+appsettings.*.local.json
+*.local.json
+secrets.json
+*.pfx
+*.key
+.env
+.env.*
+
+## OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
