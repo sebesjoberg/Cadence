@@ -7,9 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Nothing here writes to the repo; the default token gets read access only.
 permissions:
   contents: read
+  # test-reporter publishes the results as a check run, which needs more than read.
+  checks: write
 
 # A second push to the same branch makes the first run's answer worthless.
 concurrency:
@@ -45,5 +46,30 @@ jobs:
       # The Linux runners expose /var/run/docker.sock, which is exactly what Docker.Detect() looks
       # for. So SqlServerFixture starts a real SQL Server here and the storage suites run for real,
       # instead of skipping the way they do on a machine with no daemon.
+      #
+      # trx as well as console output, so the results outlive the log. The default file names are
+      # unique per assembly, so both test projects land in the directory side by side.
       - name: Test
-        run: dotnet test Cadence.slnx --configuration Release --no-build
+        id: test
+        run: >
+          dotnet test Cadence.slnx --configuration Release --no-build
+          --logger trx --results-directory artifacts/test-results
+
+      # Both of the next two run when the tests failed, which is when the detail is worth most. The
+      # conclusion check keeps them quiet when the build failed and there are no results to publish.
+      - name: Upload test results
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: artifacts/test-results/*.trx
+
+      # Third party holding a token with checks: write, so pinned by digest rather than by tag.
+      # a43b3a5 is v3.0.0.
+      - name: Publish test report
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
+        with:
+          name: tests
+          path: artifacts/test-results/*.trx
+          reporter: dotnet-trx
