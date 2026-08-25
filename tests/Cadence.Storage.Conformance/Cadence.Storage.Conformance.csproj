@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>Cadence.Storage.Conformance</RootNamespace>
+    <!-- Same waivers as the other test projects: test code may log casually, name methods with
+         underscores and skip ConfigureAwait. Every compiler warning is still an error. -->
+    <!-- This project holds abstract test classes for others to inherit, so it must not itself be
+         collected as a test assembly. -->
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <!--
+      SkippableFact behaves like Fact but additionally allows Skip.If(...) at runtime, so a test
+      needing a SQL Server container is reported as skipped rather than failed on a machine with no
+      Docker daemon. Plain Fact cannot do that in xunit 2.x: xunit reads Skip from the attribute's
+      metadata, so a value set in a constructor never reaches the runner. Dynamic skip arrives in
+      xunit v3; until then this bridges the gap. See Docker.cs and SqlServerFixture.RequireContainer.
+    -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cadence.Abstractions\Cadence.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

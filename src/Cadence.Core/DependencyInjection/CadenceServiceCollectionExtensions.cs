@@ -71,6 +71,7 @@ public static class CadenceServiceCollectionExtensions
         services.TryAddSingleton<CadenceMetrics>();
         services.TryAddSingleton<LastSuccessCache>();
         services.TryAddSingleton<ScheduleResolver>();
+        services.TryAddSingleton<ScheduleTicker>();
         services.TryAddSingleton<JobExecutor>();
         services.TryAddSingleton<JobGraphValidator>();
         services.TryAddSingleton<IJobTrigger, JobTrigger>();

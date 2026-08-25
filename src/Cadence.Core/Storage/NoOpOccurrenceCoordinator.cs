@@ -11,5 +11,6 @@ public sealed class NoOpOccurrenceCoordinator : IOccurrenceCoordinator
     public Task<bool> TryClaimAsync(
         string jobName,
         DateTimeOffset scheduledFor,
+        Guid runId,
         CancellationToken cancellationToken) => Task.FromResult(true);
 }

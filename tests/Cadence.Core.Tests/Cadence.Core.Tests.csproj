@@ -8,7 +8,6 @@
          waived. Test code is allowed to log casually, name methods with underscores, and skip
          ConfigureAwait: none of those matter outside a shipped library. Everything else, including
          every compiler warning, is still an error here. -->
-    <NoWarn>$(NoWarn);CA1848;CA1707;CA2007;CA1861;CA1812;CA1515</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,11 +15,13 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cadence.Core\Cadence.Core.csproj" />
+    <ProjectReference Include="..\Cadence.Storage.Conformance\Cadence.Storage.Conformance.csproj" />
   </ItemGroup>
 
 </Project>

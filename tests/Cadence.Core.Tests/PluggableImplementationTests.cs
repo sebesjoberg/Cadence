@@ -12,7 +12,7 @@ namespace Cadence.Core.Tests;
 public class PluggableImplementationTests
 {
     [Fact]
-    public void A_custom_coordinator_replaces_the_no_op_default()
+    public void ACustomCoordinatorReplacesTheNoOpDefault()
     {
         var resolved = Resolve<IOccurrenceCoordinator>(
             cadence => cadence.UseCoordinator<CustomCoordinator>());
@@ -21,7 +21,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void A_coordinator_instance_can_be_supplied_directly()
+    public void ACoordinatorInstanceCanBeSuppliedDirectly()
     {
         var mine = new ScriptedCoordinator(grantAll: false);
 
@@ -31,7 +31,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void A_custom_schedule_source_replaces_the_code_default()
+    public void ACustomScheduleSourceReplacesTheCodeDefault()
     {
         var resolved = Resolve<IScheduleSource>(cadence => cadence.UseScheduleSource<MutableScheduleSource>());
 
@@ -39,7 +39,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void A_custom_history_store_replaces_the_in_memory_default()
+    public void ACustomHistoryStoreReplacesTheInMemoryDefault()
     {
         var resolved = Resolve<IRunHistoryStore>(cadence => cadence.UseRunHistory<CountingHistoryStore>());
 
@@ -47,7 +47,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void A_custom_clock_replaces_the_system_clock()
+    public void ACustomClockReplacesTheSystemClock()
     {
         var clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 2, 0));
 
@@ -57,7 +57,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void Calling_a_replacement_twice_leaves_no_shadowed_registration()
+    public void CallingAReplacementTwiceLeavesNoShadowedRegistration()
     {
         var services = new ServiceCollection();
 
@@ -74,7 +74,7 @@ public class PluggableImplementationTests
     }
 
     [Fact]
-    public void Registering_a_seam_on_the_service_collection_directly_also_wins()
+    public void RegisteringASeamOnTheServiceCollectionDirectlyAlsoWins()
     {
         // Storage packages that predate the builder methods do this, so the in-memory defaults must
         // stay TryAdd-only and must be offered after the configure callback has run.
@@ -98,7 +98,11 @@ public class PluggableImplementationTests
 /// <summary>Someone's own coordinator: constructible by the container, no Cadence internals needed.</summary>
 internal sealed class CustomCoordinator : IOccurrenceCoordinator
 {
-    public Task<bool> TryClaimAsync(string jobName, DateTimeOffset scheduledFor, CancellationToken ct)
+    public Task<bool> TryClaimAsync(
+        string jobName,
+        DateTimeOffset scheduledFor,
+        Guid runId,
+        CancellationToken ct)
         => Task.FromResult(true);
 }
 

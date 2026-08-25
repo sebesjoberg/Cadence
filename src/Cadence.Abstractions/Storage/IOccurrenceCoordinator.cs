@@ -29,6 +29,16 @@ public interface IOccurrenceCoordinator
     /// </summary>
     /// <param name="jobName">The job's stable name.</param>
     /// <param name="scheduledFor">The occurrence instant, in UTC.</param>
+    /// <param name="runId">
+    /// The id the run will be recorded under if this claim succeeds, assigned by the caller before
+    /// the attempt. It is passed in rather than generated afterwards for two reasons. A store that
+    /// records the claim and the run as the same row — which is what removes the window where a
+    /// slot is claimed but unrecorded — needs the id at claim time. And it makes the claim
+    /// idempotent: an implementation whose write committed but whose acknowledgement was lost can
+    /// retry, find the existing row, and tell "someone else won" apart from "this is my own commit,
+    /// acknowledged late". Without a caller-assigned id that question has no answer, and answering
+    /// it wrongly silently skips a run this instance owns.
+    /// </param>
     /// <param name="cancellationToken">Cancels the attempt.</param>
     /// <returns>
     /// True when this instance may execute the occurrence; false when another instance already
@@ -39,5 +49,6 @@ public interface IOccurrenceCoordinator
     Task<bool> TryClaimAsync(
         string jobName,
         DateTimeOffset scheduledFor,
+        Guid runId,
         CancellationToken cancellationToken);
 }

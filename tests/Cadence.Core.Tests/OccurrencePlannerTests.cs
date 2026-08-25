@@ -30,7 +30,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void Nothing_due_plans_nothing()
+    public void NothingDuePlansNothing()
     {
         var plan = OccurrencePlanner.Plan(
             Schedule("0 * * * *"),
@@ -43,7 +43,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void A_single_due_occurrence_runs_regardless_of_policy()
+    public void ASingleDueOccurrenceRunsRegardlessOfPolicy()
     {
         foreach (var policy in Enum.GetValues<MissedRunPolicy>())
         {
@@ -60,7 +60,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void SkipToNext_drops_every_missed_occurrence()
+    public void SkipToNextDropsEveryMissedOccurrence()
     {
         var plan = OccurrencePlanner.Plan(
             Schedule("0 * * * *", MissedRunPolicy.SkipToNext),
@@ -74,7 +74,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void RunOnce_runs_only_the_most_recent_missed_occurrence()
+    public void RunOnceRunsOnlyTheMostRecentMissedOccurrence()
     {
         var plan = OccurrencePlanner.Plan(
             Schedule("0 * * * *", MissedRunPolicy.RunOnce),
@@ -88,7 +88,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void RunAll_replays_everything_within_the_cap_in_order()
+    public void RunAllReplaysEverythingWithinTheCapInOrder()
     {
         var plan = OccurrencePlanner.Plan(
             Schedule("0 * * * *", MissedRunPolicy.RunAll),
@@ -103,7 +103,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void RunAll_keeps_the_newest_occurrences_when_the_cap_truncates()
+    public void RunAllKeepsTheNewestOccurrencesWhenTheCapTruncates()
     {
         var plan = OccurrencePlanner.Plan(
             Schedule("0 * * * *", MissedRunPolicy.RunAll),
@@ -121,7 +121,7 @@ public class OccurrencePlannerTests
     }
 
     [Fact]
-    public void An_unreasonable_backlog_is_abandoned_rather_than_enumerated()
+    public void AnUnreasonableBacklogIsAbandonedRatherThanEnumerated()
     {
         // Every second, for a year: enumerating this is more expensive than any of the runs are
         // worth, and replaying it is never the intent.

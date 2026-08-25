@@ -20,7 +20,7 @@ public class SchedulingTests
     private const string Hourly = "0 * * * *";
 
     [Fact]
-    public async Task Nothing_runs_before_an_occurrence_is_due()
+    public async Task NothingRunsBeforeAnOccurrenceIsDue()
     {
         await using var host = TickHost.Create(Hourly);
 
@@ -31,7 +31,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task A_due_occurrence_runs_exactly_once()
+    public async Task ADueOccurrenceRunsExactlyOnce()
     {
         await using var host = TickHost.Create(Hourly);
 
@@ -46,7 +46,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task The_claim_is_taken_for_the_occurrence_instant_not_the_current_time()
+    public async Task TheClaimIsTakenForTheOccurrenceInstantNotTheCurrentTime()
     {
         await using var host = TickHost.Create(Hourly);
 
@@ -61,7 +61,39 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task Losing_the_claim_means_no_run_and_no_history_row()
+    public async Task TheRunIsRecordedUnderTheIdTheClaimWasTakenWith()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        // A store where the claim and the run are the same row depends on this: if the executor
+        // invented its own id after the claim, the two writes would collide on the occurrence.
+        var attempt = Assert.Single(host.Coordinator.Attempts);
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(attempt.RunId, run.RunId);
+        Assert.NotEqual(Guid.Empty, attempt.RunId);
+    }
+
+    [Fact]
+    public async Task ASkippedOccurrenceIsRecordedUnderTheClaimedId()
+    {
+        await using var host = TickHost.Create(Hourly, maxConcurrentRuns: 0);
+
+        await host.TickAsync();
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        // The claim already consumed the slot, so the skip record has to reuse its identity rather
+        // than introduce a second one for the same occurrence.
+        var attempt = Assert.Single(host.Coordinator.Attempts);
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(RunStatus.Skipped, run.Status);
+        Assert.Equal(attempt.RunId, run.RunId);
+    }
+
+    [Fact]
+    public async Task LosingTheClaimMeansNoRunAndNoHistoryRow()
     {
         await using var host = TickHost.Create(Hourly, grantClaims: false);
 
@@ -73,7 +105,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task A_disabled_job_does_not_run()
+    public async Task ADisabledJobDoesNotRun()
     {
         await using var host = TickHost.Create(Hourly, enabled: false);
 
@@ -85,7 +117,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task Re_enabling_a_job_does_not_replay_the_period_it_was_disabled_for()
+    public async Task ReEnablingAJobDoesNotReplayThePeriodItWasDisabledFor()
     {
         await using var host = TickHost.Create(Hourly, enabled: false, onMissed: MissedRunPolicy.RunAll);
 
@@ -109,7 +141,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task A_stored_cron_expression_overrides_the_code_default()
+    public async Task AStoredCronExpressionOverridesTheCodeDefault()
     {
         // The code default is hourly; the store says every 15 minutes.
         await using var host = TickHost.Create(Hourly, storedCron: "*/15 * * * *");
@@ -121,7 +153,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task One_job_with_an_unusable_expression_does_not_stop_the_others()
+    public async Task OneJobWithAnUnusableExpressionDoesNotStopTheOthers()
     {
         await using var host = TickHost.Create(Hourly, secondJobCron: "definitely not cron");
 
@@ -134,7 +166,7 @@ public class SchedulingTests
     }
 
     [Fact]
-    public async Task A_tick_that_spans_several_occurrences_applies_the_missed_run_policy()
+    public async Task ATickThatSpansSeveralOccurrencesAppliesTheMissedRunPolicy()
     {
         await using var host = TickHost.Create(Hourly, onMissed: MissedRunPolicy.RunOnce);
 
@@ -148,7 +180,7 @@ public class SchedulingTests
     private sealed class TickHost : IAsyncDisposable
     {
         private ServiceProvider _provider = null!;
-        private CadenceHostedService _service = null!;
+        private ScheduleTicker _ticker = null!;
         private JobExecutor _executor = null!;
         private FakeClock _clock = null!;
 
@@ -164,7 +196,8 @@ public class SchedulingTests
             bool enabled = true,
             bool grantClaims = true,
             MissedRunPolicy onMissed = MissedRunPolicy.SkipToNext,
-            string? secondJobCron = null)
+            string? secondJobCron = null,
+            int? maxConcurrentRuns = null)
         {
             var host = new TickHost
             {
@@ -214,6 +247,9 @@ public class SchedulingTests
             {
                 InstanceId = "test:1:aaaaaaaa",
                 ConfigPollInterval = TimeSpan.FromSeconds(15),
+                // Zero is below what Validate() allows, which is the point: it forces the capacity
+                // gate without the test having to start a long-running job first.
+                MaxConcurrentRuns = maxConcurrentRuns ?? 20,
             });
 
             var metrics = new CadenceMetrics(host._provider.GetRequiredService<IMeterFactory>());
@@ -230,31 +266,24 @@ public class SchedulingTests
 
             var resolver = new ScheduleResolver(registry, host.Source);
 
-            host._service = new CadenceHostedService(
+            host._ticker = new ScheduleTicker(
                 registry,
                 resolver,
-                host.Source,
                 host.Coordinator,
                 host.History,
                 host._executor,
-                new JobGraphValidator(
-                    registry,
-                    scopeFactory,
-                    new RegistrationDiagnostics([]),
-                    options,
-                    NullLogger<JobGraphValidator>.Instance),
                 new LastSuccessCache(host._clock),
                 host._clock,
                 metrics,
                 options,
-                NullLogger<CadenceHostedService>.Instance);
+                NullLogger<ScheduleTicker>.Instance);
 
             return host;
         }
 
         public async Task TickAsync()
         {
-            await _service.TickAsync(_clock.UtcNow, CancellationToken.None);
+            await _ticker.TickAsync(_clock.UtcNow, CancellationToken.None);
             await _executor.WaitForIdleAsync();
         }
 

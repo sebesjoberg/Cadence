@@ -7,7 +7,7 @@ namespace Cadence.Core.Tests;
 public class RegistrationTests
 {
     [Fact]
-    public void Attribute_metadata_becomes_the_descriptor()
+    public void AttributeMetadataBecomesTheDescriptor()
     {
         var registry = BuildRegistry(cadence => cadence.AddJob<AttributedJob>());
 
@@ -21,7 +21,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void Fluent_registration_produces_the_same_shape()
+    public void FluentRegistrationProducesTheSameShape()
     {
         var registry = BuildRegistry(cadence => cadence.AddJob<SucceedingJob>(
             "invoice-sync",
@@ -37,7 +37,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void An_invalid_cron_literal_fails_at_registration_not_at_the_first_tick()
+    public void AnInvalidCronLiteralFailsAtRegistrationNotAtTheFirstTick()
     {
         var exception = Assert.Throws<CadenceStartupException>(() => BuildRegistry(
             cadence => cadence.AddJob<SucceedingJob>("bad", job => job.Cron("not a cron"))));
@@ -46,7 +46,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void A_scheduled_job_with_no_cron_is_rejected_with_a_hint()
+    public void AScheduledJobWithNoCronIsRejectedWithAHint()
     {
         var exception = Assert.Throws<CadenceStartupException>(() => BuildRegistry(
             cadence => cadence.AddJob<SucceedingJob>("no-cron", _ => { })));
@@ -55,7 +55,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void ApiOnly_registers_a_job_with_no_schedule()
+    public void ApiOnlyRegistersAJobWithNoSchedule()
     {
         var registry = BuildRegistry(cadence => cadence.AddJob<SucceedingJob>(
             "rebuild-search-index",
@@ -68,7 +68,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void Two_jobs_with_the_same_name_fail_at_registration()
+    public void TwoJobsWithTheSameNameFailAtRegistration()
     {
         var exception = Assert.Throws<CadenceStartupException>(() => BuildRegistry(cadence => cadence
             .AddJob<SucceedingJob>("clash", job => job.Cron("* * * * *"))
@@ -78,7 +78,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void A_non_positive_maximum_duration_is_rejected()
+    public void ANonPositiveMaximumDurationIsRejected()
     {
         Assert.Throws<CadenceStartupException>(() => BuildRegistry(
             cadence => cadence.AddJob<SucceedingJob>(
@@ -86,7 +86,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void Jobs_are_registered_as_transient_by_default()
+    public void JobsAreRegisteredAsTransientByDefault()
     {
         var services = new ServiceCollection();
         CadenceServiceCollectionExtensions.AddCadenceCore(
@@ -99,7 +99,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void A_singleton_job_registration_is_warned_about_rather_than_rejected()
+    public void ASingletonJobRegistrationIsWarnedAboutRatherThanRejected()
     {
         var services = new ServiceCollection();
         services.AddSingleton<SucceedingJob>();
@@ -117,7 +117,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void Assembly_scanning_picks_up_attributed_jobs()
+    public void AssemblyScanningPicksUpAttributedJobs()
     {
         var registry = BuildRegistry(cadence => cadence.AddJobsFromAssemblyOf<AttributedJob>());
 
@@ -125,7 +125,7 @@ public class RegistrationTests
     }
 
     [Fact]
-    public void Explicit_registration_wins_over_scanning_rather_than_colliding()
+    public void ExplicitRegistrationWinsOverScanningRatherThanColliding()
     {
         // Both paths see AttributedJob. Registering it explicitly first must not then trip the
         // duplicate-name check when the scanner reaches it.

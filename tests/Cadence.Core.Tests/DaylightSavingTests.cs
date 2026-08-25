@@ -12,7 +12,7 @@ public class DaylightSavingTests
     private static readonly CronExpressionHolder NightlyAtHalfPastTwo = new("30 2 * * *");
 
     [Fact]
-    public void Spring_forward_fires_at_the_transition_rather_than_skipping_the_day()
+    public void SpringForwardFiresAtTheTransitionRatherThanSkippingTheDay()
     {
         // 2026-03-29: Stockholm goes 02:00 CET -> 03:00 CEST, so 02:30 local never happens.
         var dayBefore = Occurrences.Utc(2026, 3, 28, 1, 30);   // 02:30 CET
@@ -28,7 +28,7 @@ public class DaylightSavingTests
     }
 
     [Fact]
-    public void The_day_after_spring_forward_returns_to_the_configured_time()
+    public void TheDayAfterSpringForwardReturnsToTheConfiguredTime()
     {
         var transition = Occurrences.Utc(2026, 3, 29, 1, 0);
 
@@ -39,7 +39,7 @@ public class DaylightSavingTests
     }
 
     [Fact]
-    public void Autumn_back_fires_once_for_the_hour_that_happens_twice()
+    public void AutumnBackFiresOnceForTheHourThatHappensTwice()
     {
         // 2026-10-25: Stockholm goes 03:00 CEST -> 02:00 CET, so 02:30 local happens twice —
         // once at 00:30Z (CEST) and once at 01:30Z (CET).
@@ -58,7 +58,7 @@ public class DaylightSavingTests
     }
 
     [Fact]
-    public void Occurrence_keys_stay_unique_across_the_repeated_hour()
+    public void OccurrenceKeysStayUniqueAcrossTheRepeatedHour()
     {
         // The claim key is derived from UTC, so even an every-15-minutes job crossing the repeated
         // hour produces distinct occurrences with no collisions.

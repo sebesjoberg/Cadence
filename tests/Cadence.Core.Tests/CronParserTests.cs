@@ -9,7 +9,7 @@ public class CronParserTests
     [InlineData("*/15 * * * *")]        // 5 fields
     [InlineData("0 */15 * * * *")]      // 6 fields, with seconds
     [InlineData("0 2 * * *")]
-    public void Parses_five_and_six_field_expressions(string expression)
+    public void ParsesFiveAndSixFieldExpressions(string expression)
     {
         Assert.True(CronParser.TryParse(expression, out var parsed, out var error));
         Assert.NotNull(parsed);
@@ -23,7 +23,7 @@ public class CronParserTests
     [InlineData("* * * * * * *")]            // too many fields
     [InlineData("bogus * * * *")]
     [InlineData("99 * * * *")]
-    public void Rejects_malformed_expressions_with_an_explanation(string expression)
+    public void RejectsMalformedExpressionsWithAnExplanation(string expression)
     {
         Assert.False(CronParser.TryParse(expression, out var parsed, out var error));
         Assert.Null(parsed);
@@ -31,21 +31,21 @@ public class CronParserTests
     }
 
     [Fact]
-    public void Field_count_mismatch_says_what_the_count_was()
+    public void FieldCountMismatchSaysWhatTheCountWas()
     {
         Assert.False(CronParser.TryParse("* * *", out _, out var error));
         Assert.Contains("3 fields", error, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Null_or_empty_timezone_resolves_to_utc()
+    public void NullOrEmptyTimezoneResolvesToUtc()
     {
         Assert.True(CronParser.TryResolveTimeZone(null, out var zone, out _));
         Assert.Equal(TimeZoneInfo.Utc, zone);
     }
 
     [Fact]
-    public void Resolves_iana_ids()
+    public void ResolvesIanaIds()
     {
         Assert.True(CronParser.TryResolveTimeZone("Europe/Stockholm", out var zone, out var error));
         Assert.NotNull(zone);
@@ -53,7 +53,7 @@ public class CronParserTests
     }
 
     [Fact]
-    public void Unknown_timezone_error_names_the_globalization_cause()
+    public void UnknownTimezoneErrorNamesTheGlobalizationCause()
     {
         Assert.False(CronParser.TryResolveTimeZone("Mars/Olympus_Mons", out _, out var error));
 
