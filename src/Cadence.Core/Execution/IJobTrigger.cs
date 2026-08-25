@@ -19,6 +19,7 @@ public interface IJobTrigger
     /// <param name="cancellationToken">Cancels the bookkeeping writes, not the run.</param>
     /// <exception cref="JobNotFoundException">No job is registered under that name.</exception>
     /// <exception cref="TriggerNotAllowedException">The job does not accept that trigger.</exception>
+    /// <exception cref="SchedulerPausedException">Triggers are paused cluster-wide.</exception>
     Task<DispatchResult> TriggerAsync(
         string jobName,
         TriggerKind trigger = TriggerKind.Manual,

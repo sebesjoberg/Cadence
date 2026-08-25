@@ -267,6 +267,7 @@ public sealed class ClusteredSchedulingTests
                     connection, options, NullLogger<RedisScheduleSource>.Instance);
 
                 var coordinator = new RedisOccurrenceCoordinator(connection, clock, cadenceOptions);
+                var pauses = new RedisPauseStore(connection, clock);
 
                 var metrics = new CadenceMetrics(provider.GetRequiredService<IMeterFactory>());
                 var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
@@ -285,6 +286,7 @@ public sealed class ClusteredSchedulingTests
                     new ScheduleResolver(registry, source),
                     coordinator,
                     history,
+                    pauses,
                     executor,
                     new LastSuccessCache(clock),
                     clock,

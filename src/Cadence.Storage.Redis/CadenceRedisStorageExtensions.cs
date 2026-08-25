@@ -86,6 +86,10 @@ public static class CadenceRedisStorageExtensions
         services.Replace(ServiceDescriptor.Singleton<IWritableScheduleSource>(
             sp => sp.GetRequiredService<RedisScheduleSource>()));
 
+        services.Replace(ServiceDescriptor.Singleton<IPauseStore>(sp => new RedisPauseStore(
+            sp.GetRequiredService<RedisConnection>(),
+            sp.GetRequiredService<ISystemClock>())));
+
         // No schema initialiser, and nothing to migrate. Redis creates a key when it is first
         // written, which removes the whole question the SQL tier answers with a migrator, an
         // application lock and a folder of reviewable scripts.

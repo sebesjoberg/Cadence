@@ -1,3 +1,4 @@
+using Cadence.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Cadence.Diagnostics;
@@ -73,6 +74,19 @@ internal static partial class Log
         Level = LogLevel.Warning,
         Message = "Could not read the last run of '{JobName}'. Catch-up will start from now.")]
     public static partial void LastRunReadFailed(this ILogger logger, Exception exception, string jobName);
+
+    [LoggerMessage(
+        EventId = 1104,
+        Level = LogLevel.Warning,
+        Message = "Pause changed from {Previous} to {Current}, set by {SetBy}: {Reason}")]
+    public static partial void PauseChanged(
+        this ILogger logger, PauseScope previous, PauseScope current, string? setBy, string? reason);
+
+    [LoggerMessage(
+        EventId = 1105,
+        Level = LogLevel.Error,
+        Message = "Could not read the pause switches. Continuing with {Current}.")]
+    public static partial void PauseReadFailed(this ILogger logger, Exception exception, PauseScope current);
 
     // 1200-1299: the tick loop.
 

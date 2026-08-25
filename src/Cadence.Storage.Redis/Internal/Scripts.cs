@@ -305,4 +305,23 @@ internal static class Scripts
         redis.call('INCR', KEYS[3])
         return {1, advanced}
         """;
+
+    /// <summary>
+    /// Writes the pause switches and bumps the schedule version counter.
+    /// </summary>
+    /// <remarks>
+    /// KEYS: pause hash, schedule version counter.
+    /// ARGV: scope, reason, set-by, set-at ticks.
+    /// Returns the advanced version, which is what the caller publishes so subscribers reload.
+    /// <para>
+    /// The bump is what makes pause arrive: it rides the change detection schedules already use,
+    /// rather than adding a second thing for every instance to poll.
+    /// </para>
+    /// </remarks>
+    public const string SetPause =
+        """
+        redis.call('HSET', KEYS[1],
+          'scope', ARGV[1], 'reason', ARGV[2], 'by', ARGV[3], 'at', ARGV[4])
+        return redis.call('INCR', KEYS[2])
+        """;
 }

@@ -34,6 +34,7 @@ public sealed class ScheduleTicker
     private readonly ScheduleResolver _resolver;
     private readonly IOccurrenceCoordinator _coordinator;
     private readonly IRunHistoryStore _history;
+    private readonly IPauseStore _pauses;
     private readonly JobExecutor _executor;
     private readonly LastSuccessCache _lastSuccess;
     private readonly ISystemClock _clock;
@@ -47,12 +48,14 @@ public sealed class ScheduleTicker
     private volatile bool _reloadRequested = true;
     private DateTimeOffset _lastReload = DateTimeOffset.MinValue;
     private DateTimeOffset _lastSuccessRefresh = DateTimeOffset.MinValue;
+    private PauseState _pause = PauseState.None;
 
     /// <summary>Creates the ticker.</summary>
     /// <param name="registry">The registered jobs.</param>
     /// <param name="resolver">Layers stored schedules over code-declared defaults.</param>
     /// <param name="coordinator">Decides which instance runs an occurrence.</param>
     /// <param name="history">Read to seed how far back a newly loaded job should look.</param>
+    /// <param name="pauses">The cluster-wide pause switches, re-read with the schedules.</param>
     /// <param name="executor">Starts the runs this ticker claims.</param>
     /// <param name="lastSuccess">Backs the staleness gauge; refreshed on the poll interval.</param>
     /// <param name="clock">The only source of the current time.</param>
@@ -64,6 +67,7 @@ public sealed class ScheduleTicker
         ScheduleResolver resolver,
         IOccurrenceCoordinator coordinator,
         IRunHistoryStore history,
+        IPauseStore pauses,
         JobExecutor executor,
         LastSuccessCache lastSuccess,
         ISystemClock clock,
@@ -75,6 +79,7 @@ public sealed class ScheduleTicker
         ArgumentNullException.ThrowIfNull(resolver);
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(pauses);
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(lastSuccess);
         ArgumentNullException.ThrowIfNull(clock);
@@ -86,6 +91,7 @@ public sealed class ScheduleTicker
         _resolver = resolver;
         _coordinator = coordinator;
         _history = history;
+        _pauses = pauses;
         _executor = executor;
         _lastSuccess = lastSuccess;
         _clock = clock;
@@ -144,8 +150,11 @@ public sealed class ScheduleTicker
 
         // A disabled job's occurrences are treated as never having existed: the evaluation point
         // moves forward with the clock. Otherwise re-enabling a job would replay everything missed
-        // while it was off, which is a footgun even with the catch-up cap in place.
-        if (!schedule.Enabled || _disabledByValidation.Contains(schedule.Descriptor.Name))
+        // while it was off, which is a footgun even with the catch-up cap in place. A cluster-wide
+        // pause takes the same branch, and gets the same property: resuming replays nothing.
+        if (!schedule.Enabled
+            || _pause.IsSchedulePaused
+            || _disabledByValidation.Contains(schedule.Descriptor.Name))
         {
             state.LastEvaluated = now;
             return;
@@ -209,6 +218,8 @@ public sealed class ScheduleTicker
         _reloadRequested = false;
         _lastReload = now;
 
+        await ReloadPauseAsync(cancellationToken).ConfigureAwait(false);
+
         ScheduleResolution resolution;
 
         try
@@ -248,6 +259,30 @@ public sealed class ScheduleTicker
         {
             _states.Remove(jobName);
         }
+    }
+
+    private async Task ReloadPauseAsync(CancellationToken cancellationToken)
+    {
+        PauseState state;
+
+        try
+        {
+            state = await _pauses.GetAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Keep the switches where they were. A store blip must neither pause a running cluster
+            // nor resume a paused one.
+            _logger.PauseReadFailed(ex, _pause.Scope);
+            return;
+        }
+
+        if (state.Scope != _pause.Scope)
+        {
+            _logger.PauseChanged(_pause.Scope, state.Scope, state.SetBy, state.Reason);
+        }
+
+        _pause = state;
     }
 
     /// <summary>

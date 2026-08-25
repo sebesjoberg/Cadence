@@ -85,6 +85,10 @@ public static class CadenceSqlStorageExtensions
         services.Replace(ServiceDescriptor.Singleton<IWritableScheduleSource>(
             sp => sp.GetRequiredService<SqlScheduleSource>()));
 
+        services.Replace(ServiceDescriptor.Singleton<IPauseStore>(sp => new SqlPauseStore(
+            sp.GetRequiredService<SqlDatabase>(),
+            sp.GetRequiredService<ISystemClock>())));
+
         // Registration order is start order for hosted services, and UseSqlStorage is called from
         // inside the AddCadence callback -- which runs before AddCadence registers the scheduler.
         // So the schema is in place before the first tick tries to claim anything.

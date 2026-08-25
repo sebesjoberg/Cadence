@@ -133,6 +133,13 @@ public sealed class CadenceBuilder
         where TSource : class, IScheduleSource
         => ReplaceSingleton<IScheduleSource, TSource>();
 
+    /// <summary>Replaces where the cluster-wide pause switches live.</summary>
+    /// <typeparam name="TStore">The implementation to use.</typeparam>
+    /// <returns>This builder.</returns>
+    public CadenceBuilder UsePauseStore<TStore>()
+        where TStore : class, IPauseStore
+        => ReplaceSingleton<IPauseStore, TStore>();
+
     /// <summary>Replaces where run history is recorded.</summary>
     /// <typeparam name="TStore">The implementation to use.</typeparam>
     /// <returns>This builder.</returns>

@@ -35,3 +35,17 @@ public sealed class MutableScheduleSourceConformanceTests : ScheduleSourceConfor
     protected override Task<IWritableScheduleSource> CreateAsync()
         => Task.FromResult<IWritableScheduleSource>(new MutableScheduleSource());
 }
+
+/// <summary>
+/// Runs the shared pause contract against the in-memory tier, minus the one part it does not
+/// claim: the switches live in this process and reach nobody else.
+/// </summary>
+public sealed class InMemoryPauseStoreConformanceTests : PauseStoreConformance
+{
+    /// <inheritdoc />
+    protected override bool IsDistributed => false;
+
+    /// <inheritdoc />
+    protected override Task<IPauseStore> CreateAsync()
+        => Task.FromResult<IPauseStore>(new InMemoryPauseStore(new SystemClock()));
+}

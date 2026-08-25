@@ -157,9 +157,9 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | | Milestone | Contents |
 |---|---|---|
 | **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain |
-| **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*; the Aspire host follows on its own branch before v0.3 |
+| **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*, with the Aspire host demonstrating it between real processes |
 | — | **decision point** | *resolved — see below* |
-| v0.3 | Control surface | API, the auth gate, distributed pause — *the writable schedule source and change tokens landed early, in v0.2* |
+| v0.3 | Control surface | API, the auth gate, distributed pause — *pause has landed; the writable schedule source and change tokens landed early, in v0.2* |
 | v0.4 | Dashboard | overview, detail, schedule editing, manual trigger |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
@@ -195,7 +195,7 @@ here; what it did move was the janitor, and §11.2 records why.
 | 2 | Per-job concurrency caps | **Defer.** Global `MaxConcurrentRuns` + `Skip` is enough for v1. |
 | 3 | Payload JSON Schema | **No.** Leave payloads opaque; the job validates. Saves a dependency and a UI surface. |
 | 4 | Retry within run vs. reschedule | **Cut `MaxAttempts` from v1.** In-run retry makes duration and timeout ambiguous in history. Later, do it as a new run with `Trigger = Retry` and `ScheduledForUtc = null`, which sidesteps claim uniqueness entirely. |
-| 5 | Distributed pause | **Yes, v1.** One row, and it is exactly what you want during an incident. |
+| 5 | Distributed pause | **Yes, v1 — done, as two switches rather than one.** See §12. |
 | 6 | Merge Api + Dashboard | **Merge the auth surface, keep the packages.** One `MapCadence()`, one policy, one options object; Dashboard depends on Api. Halves what has to be documented and secured. |
 
 ---
@@ -318,7 +318,7 @@ the tick's relationship to `ScheduledForUtc` harder to reason about than the cur
 
 ---
 
-## 10. The end-to-end sample, and what it is waiting for
+## 10. The end-to-end samples
 
 `samples/Cadence.Sample.Worker` runs one job every ten seconds and consumes Cadence
 **as a package from a local feed**, not by project reference — which is why it caught
@@ -329,15 +329,15 @@ carrying `JobName`/`RunId`/`InstanceId` as scope attributes, a `cadence.job` spa
 the §14 tags and a `cadence.job.progress` event, and the metrics including
 `seconds_since_success`.
 
-### The Aspire version: one blocker cleared, one standing
+### The Aspire version: built, with one blocker still standing
 
-The target sample — Aspire orchestrating SQL Server, two worker replicas contending for
-the same occurrences, the dashboard rendering history — was blocked on two things:
+`samples/Cadence.Sample.AppHost` now runs three replicas against one SQL Server. What it
+measured is §9.4. It was blocked on two things:
 
 | Blocker | Milestone | Status |
 |---|---|---|
 | `Cadence.Storage.Sql` | v0.2 | **Cleared.** Without the unique-index claim, two replicas both run every occurrence, so the sample would have demonstrated the bug rather than the guarantee |
-| `Cadence.Dashboard` | v0.4 | Standing. The history sink has no reader, and in-memory history is per-instance and dies with the process — so the first Aspire host reads history from the log, not a UI |
+| `Cadence.Dashboard` | v0.4 | Standing. The history sink has no reader, so the sample reads history from Aspire's own dashboard — which shows OTel, not `CadenceJobRun` |
 
 **The first of the two consequences recorded here was wrong, and the correction matters.**
 It read: *"The Aspire host is where clustering gets proven — N replicas, one run per
@@ -348,8 +348,8 @@ test process, which is exactly what `ClusteredSchedulingTests` does. Clustering 
 there, in seconds, on every CI run — where an Aspire host proves it once, by hand, for
 whoever is watching the logs at the time.
 
-So the Aspire host is a **demonstration**, not the proof, and it should be built for what
-only it can show:
+So the Aspire host is a **demonstration**, not the proof, and it was built for what only it can
+show:
 
 1. **Real process boundaries.** Separate processes, separate `InstanceId`s, a real network
    between them and the database, and a replica that can be killed mid-run to watch the
@@ -413,3 +413,34 @@ The pushed schedule change is the one place Redis is straightforwardly better: a
 reaches other instances in milliseconds instead of within a poll interval. The poll stays
 anyway — Redis pub/sub is fire-and-forget with no redelivery, and a scheduler that silently
 stopped noticing schedule edits would look perfectly healthy while ignoring the dashboard.
+
+---
+
+## 12. Pause, and why it is two switches
+
+§7 answered "distributed pause?" with *yes, one row*. Building it turned one row into two switches,
+because the incident it exists for wants them apart: stop the automatic work, keep the ability to
+run one job by hand. A single switch forces a choice between an operator with no brake and an
+operator with no escape hatch. `PauseScope` is therefore a flags enum — `Schedule`, `Triggers`,
+both, neither — and the one row holds it along with who set it and why.
+
+**A paused occurrence is treated as never having existed**, which is §9.3's rule reused rather than
+a second policy: the ticker takes the same branch as a disabled job, so the evaluation point
+advances and resuming starts from the next occurrence. Anyone who pauses for an hour and expects
+the hour back on resume is expecting the thing §9.3 explains nobody means.
+
+**The write rides the schedule version.** `SqlPauseStore` bumps `CadenceScheduleVersion` in the
+transaction that writes the switches, and `RedisPauseStore` INCRs the counter and publishes on the
+schedule channel. Neither tier adds anything for an instance to poll: the ticker re-reads the
+switches on the same reload as the schedules, so a pause arrives on the machinery §11.3 already
+measured. The cost of that reuse is one small read per instance per config poll, and the property
+bought is that a pause and a schedule edit can never be observed out of order.
+
+**The trigger gate reads through, the tick loop reads cached.** A trigger is rare enough to afford
+a round trip, and someone pausing during an incident should not watch a run start ten seconds
+later; the tick loop runs every second and cannot. The asymmetry is deliberate.
+
+**In-memory, pause is process-local, and the conformance suite says so** — `IsDistributed` is
+false for that tier and the cross-instance test skips rather than being quietly dropped. The
+alternative, letting two in-memory stores share static state to make the test pass, would have made
+the suite lie about the tier it was hardest to be honest about.
