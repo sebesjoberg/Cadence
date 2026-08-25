@@ -9,10 +9,8 @@ on:
 
 permissions:
   contents: read
-  # test-reporter publishes the results as a check run, which needs more than read.
-  checks: write
+  checks: write   # test-reporter publishes results as a check run
 
-# A second push to the same branch makes the first run's answer worthless.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,17 +18,13 @@ concurrency:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-
-    # Generous because the SQL Server tests pull a ~1.5 GB image and then wait for the server to
-    # finish starting. A run that exceeds this is stuck, not slow.
     timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v7
 
-      # global.json names the minimum SDK, not an exact one: rollForward is latestFeature, so a newer
-      # feature band on the runner is fine. Raising the floor is a deliberate commit.
-      - name: Install the pinned SDK
+      # global.json is a floor, not a pin: rollForward is latestFeature.
+      - name: Install the SDK
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
@@ -38,25 +32,19 @@ jobs:
       - name: Restore
         run: dotnet restore Cadence.slnx
 
-      # TreatWarningsAsErrors and EnforceCodeStyleInBuild are set in Directory.Build.props, so this
-      # is the analyzer and style gate as well as the compile.
+      # Warnings are errors via Directory.Build.props, so this is the analyzer gate too.
       - name: Build
         run: dotnet build Cadence.slnx --configuration Release --no-restore
 
-      # The Linux runners expose /var/run/docker.sock, which is exactly what Docker.Detect() looks
-      # for. So SqlServerFixture starts a real SQL Server here and the storage suites run for real,
-      # instead of skipping the way they do on a machine with no daemon.
-      #
-      # trx as well as console output, so the results outlive the log. The default file names are
-      # unique per assembly, so both test projects land in the directory side by side.
+      # The runner exposes /var/run/docker.sock, so SqlServerFixture starts a real SQL Server here
+      # rather than skipping.
       - name: Test
         id: test
         run: >
           dotnet test Cadence.slnx --configuration Release --no-build
           --logger trx --results-directory artifacts/test-results
 
-      # Both of the next two run when the tests failed, which is when the detail is worth most. The
-      # conclusion check keeps them quiet when the build failed and there are no results to publish.
+      # Publish on failure too — that is when the detail matters.
       - name: Upload test results
         if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
         uses: actions/upload-artifact@v7
@@ -64,8 +52,7 @@ jobs:
           name: test-results
           path: artifacts/test-results/*.trx
 
-      # Third party holding a token with checks: write, so pinned by digest rather than by tag.
-      # a43b3a5 is v3.0.0.
+      # Third party holding checks: write, so pinned by digest. a43b3a5 is v3.0.0.
       - name: Publish test report
         if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2

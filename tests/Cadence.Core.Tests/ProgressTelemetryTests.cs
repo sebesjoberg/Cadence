@@ -16,31 +16,29 @@ public class ProgressTelemetryTests
     [Fact]
     public void ProgressBecomesAnEventOnTheRunActivity()
     {
-        var recorded = new List<Activity>();
-
+        // Only here so the source samples; StartActivity returns null with nothing listening. It
+        // does not collect: AddActivityListener is process-wide, so it would also catch the
+        // cadence.job activities that test classes running in parallel start.
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == CadenceDiagnostics.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = recorded.Add,
         };
 
         ActivitySource.AddActivityListener(listener);
 
         var sink = BuildSink(out _);
 
-        using (var activity = CadenceDiagnostics.ActivitySource.StartActivity(
-                   CadenceDiagnostics.RunActivityName))
-        {
-            Assert.NotNull(activity);
-            sink.Report(Guid.NewGuid(), "processed 400 of 12000", new Dictionary<string, object?>
-            {
-                ["done"] = 400,
-            });
-        }
+        using var activity = CadenceDiagnostics.ActivitySource.StartActivity(
+            CadenceDiagnostics.RunActivityName);
 
-        var span = Assert.Single(recorded);
-        var progress = Assert.Single(span.Events, e => e.Name == CadenceDiagnostics.ProgressEventName);
+        Assert.NotNull(activity);
+        sink.Report(Guid.NewGuid(), "processed 400 of 12000", new Dictionary<string, object?>
+        {
+            ["done"] = 400,
+        });
+
+        var progress = Assert.Single(activity.Events, e => e.Name == CadenceDiagnostics.ProgressEventName);
 
         Assert.Equal("processed 400 of 12000", progress.Tags.Single(t => t.Key == "message").Value);
 
