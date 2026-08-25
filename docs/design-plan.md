@@ -270,6 +270,37 @@ a month would queue ~8,600 runs on re-enable, capped. Capping a footgun is worse
 not having it: nobody who ticks "enabled" in a dashboard means "and replay the last
 month". `MaxCatchUp` still guards the case it should, which is host downtime.
 
+### 9.4 Occurrence claiming elects a leader; it does not spread load
+
+Measured in `samples/Cadence.Sample.AppHost`, three replicas against one SQL Server, twice:
+
+| Replica start order | Occurrences won |
+|---|---|
+| first, by ~40 ms | **all of them** |
+| second | none |
+| third | none |
+
+Both runs, the same shape, and the winner changed between runs exactly as start order did. The cause
+is not subtle: every replica ticks on its own one-second timer, whose phase is fixed by when the
+process started, and the claim is a race to an `INSERT`. A replica whose tick fires 40 ms earlier
+wins every race there is, forever, until it stops.
+
+Nothing here is broken — §3.1's guarantee is about *at most one*, and one is what runs. But "three
+replicas, so the work is spread three ways" is the obvious reading of a cluster, and it is wrong:
+the other replicas are failover capacity that happens to be warm. Failover itself is immediate;
+killing the leader mid-run moved every subsequent claim to the next-earliest replica within one
+occurrence, and the janitor marked the interrupted run `Lost` 21 seconds later.
+
+This belongs in the README next to the guarantee, because someone sizing a cluster on the assumption
+that replicas share the load will size it wrong.
+
+**A fix exists and is deliberately not being taken yet.** Jittering each instance's tick phase by a
+random fraction of `TickInterval` would spread wins across replicas without touching the claim. It is
+a small change to the tick loop and a real change to a load-bearing path, so it wants its own
+decision rather than a ride on a sample's branch. Two things to weigh when it comes up: whether
+even distribution is a property worth *promising* once it has been observed, and whether jitter makes
+the tick's relationship to `ScheduledForUtc` harder to reason about than the current fixed phase.
+
 ---
 
 ## 10. The end-to-end sample, and what it is waiting for

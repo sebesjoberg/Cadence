@@ -1,0 +1,33 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.2">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <UserSecretsId>a589d918-f881-48b9-bc40-34a16febe605</UserSecretsId>
+
+    <!--
+      The SDK defaults this to false and then warns (ASPIRE010) that its own default disables
+      features. Those features are the orchestrator and the dashboard, which is the entire user
+      interface of this sample, so turning it on is the answer rather than suppressing the warning.
+    -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.5.2" />
+  </ItemGroup>
+
+  <!--
+    A project reference, unlike everything else under samples/. This one is not consuming Cadence —
+    it is telling Aspire which project to launch, and that is what generates the Projects.* type used
+    in AppHost.cs. The worker it launches still gets Cadence from the local package feed.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Cadence.Sample.ClusteredWorker\Cadence.Sample.ClusteredWorker.csproj" />
+  </ItemGroup>
+
+</Project>
