@@ -99,10 +99,31 @@ public static class CadenceSqlStorageExtensions
 
         services.AddHostedService(sp => sp.GetRequiredService<SqlInstanceRegistry>());
 
-        services.AddSingleton<CadenceJanitor>(sp => new CadenceJanitor(
+        // The janitor itself lives in Core: reap before purge, batch, never escalate a failure into
+        // a scheduling problem is policy no storage tier should be restating. What the SQL tier
+        // supplies is the four operations and the three numbers they need.
+        services.TryAddSingleton<IStorageMaintenance>(sp => new SqlStorageMaintenance(
             sp.GetRequiredService<SqlDatabase>(),
-            sp.GetRequiredService<SqlRunHistoryStore>(),
-            sp.GetRequiredService<SqlStorageOptions>(),
+            sp.GetRequiredService<SqlRunHistoryStore>()));
+
+        services.TryAddSingleton(sp =>
+        {
+            var sql = sp.GetRequiredService<SqlStorageOptions>();
+
+            var janitor = new JanitorOptions
+            {
+                Interval = sql.JanitorInterval,
+                BatchSize = sql.JanitorBatchSize,
+                HeartbeatTimeout = sql.HeartbeatTimeout,
+            };
+
+            janitor.Validate();
+            return janitor;
+        });
+
+        services.AddSingleton<CadenceJanitor>(sp => new CadenceJanitor(
+            sp.GetRequiredService<IStorageMaintenance>(),
+            sp.GetRequiredService<JanitorOptions>(),
             sp.GetRequiredService<ISystemClock>(),
             sp.GetRequiredService<IOptions<CadenceOptions>>(),
             sp.GetRequiredService<ILogger<CadenceJanitor>>()));

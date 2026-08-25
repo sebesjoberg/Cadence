@@ -92,31 +92,6 @@ internal static partial class Log
         Message = "Deregistered instance '{InstanceId}'.")]
     public static partial void InstanceDeregistered(this ILogger logger, string instanceId);
 
-    // 2300-2399: janitor.
-
-    [LoggerMessage(
-        EventId = 2300,
-        Level = LogLevel.Information,
-        Message = "Janitor pass: purged {PurgedByAge} run(s) by age, trimmed {TrimmedPerJob} " +
-                  "run(s) over the per-job cap, reaped {Reaped} abandoned run(s), removed " +
-                  "{DeadInstances} dead instance(s).")]
-    public static partial void JanitorPass(
-        this ILogger logger, int purgedByAge, int trimmedPerJob, int reaped, int deadInstances);
-
-    [LoggerMessage(
-        EventId = 2301,
-        Level = LogLevel.Error,
-        Message = "A janitor pass failed. History will keep growing until a pass succeeds, but " +
-                  "scheduling is unaffected.")]
-    public static partial void JanitorFailed(this ILogger logger, Exception exception);
-
-    [LoggerMessage(
-        EventId = 2302,
-        Level = LogLevel.Warning,
-        Message = "Marked {Count} run(s) as lost: their instance stopped heartbeating more than " +
-                  "{Timeout} ago, so no outcome was ever recorded for them.")]
-    public static partial void RunsReaped(this ILogger logger, int count, TimeSpan timeout);
-
     // 2400-2499: schedules and progress.
 
     [LoggerMessage(

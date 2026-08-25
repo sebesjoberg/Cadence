@@ -177,4 +177,30 @@ internal static partial class Log
         Message = "Run {RunId} of '{JobName}' did not stop within the drain timeout and has been recorded " +
                   "as aborted. The job is not observing its cancellation token.")]
     public static partial void StragglerAborted(this ILogger logger, Guid runId, string jobName);
+
+    // 1500-1599: the janitor. Core rather than a storage package because the policy is one
+    // implementation shared by every persistent tier; only the operations differ.
+
+    [LoggerMessage(
+        EventId = 1500,
+        Level = LogLevel.Information,
+        Message = "Janitor pass: purged {PurgedByAge} run(s) by age, trimmed {TrimmedPerJob} " +
+                  "run(s) over the per-job cap, reaped {Reaped} abandoned run(s), removed " +
+                  "{DeadInstances} dead instance(s).")]
+    public static partial void JanitorPass(
+        this ILogger logger, int purgedByAge, int trimmedPerJob, int reaped, int deadInstances);
+
+    [LoggerMessage(
+        EventId = 1501,
+        Level = LogLevel.Error,
+        Message = "A janitor pass failed. History will keep growing until a pass succeeds, but " +
+                  "scheduling is unaffected.")]
+    public static partial void JanitorFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 1502,
+        Level = LogLevel.Warning,
+        Message = "Marked {Count} run(s) as lost: their instance stopped heartbeating more than " +
+                  "{Timeout} ago, so no outcome was ever recorded for them.")]
+    public static partial void RunsReaped(this ILogger logger, int count, TimeSpan timeout);
 }

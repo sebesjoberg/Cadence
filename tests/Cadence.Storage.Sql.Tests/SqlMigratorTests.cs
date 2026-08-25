@@ -1,3 +1,4 @@
+using Cadence.Storage.Conformance;
 using Cadence.Storage.Sql.Internal;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -167,7 +168,7 @@ public sealed class SqlMigratorTests
     [SkippableFact]
     public async Task AnUnreachableDatabaseFailsLoudlyRatherThanQuietly()
     {
-        Skip.If(Docker.SkipReason is not null, Docker.SkipReason ?? string.Empty);
+        Skip.If(DockerDaemon.SkipReason is not null, DockerDaemon.SkipReason ?? string.Empty);
 
         var options = new SqlStorageOptions
         {

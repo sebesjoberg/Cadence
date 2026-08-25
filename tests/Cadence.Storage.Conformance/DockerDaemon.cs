@@ -1,14 +1,20 @@
-namespace Cadence.Storage.Sql.Tests;
+namespace Cadence.Storage.Conformance;
 
 /// <summary>
 /// Works out whether a Docker daemon is reachable, once per process.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Probed by looking for the endpoint rather than by trying to start a container: the answer is
-/// needed before the fixture does any work, and a failed container start takes tens of seconds to
-/// time out. A false positive here just means the fixture reports the real error instead.
+/// needed before a fixture does any work, and a failed container start takes tens of seconds to time
+/// out. A false positive here just means the fixture reports the real error instead.
+/// </para>
+/// <para>
+/// Shared by every storage tier's tests. Each tier needs the same answer to the same question, and
+/// two copies of a probe like this drift the moment one of them is fixed.
+/// </para>
 /// </remarks>
-internal static class Docker
+public static class DockerDaemon
 {
     /// <summary>Why Docker is unusable, or null when it looks available.</summary>
     public static string? SkipReason { get; } = Detect();
@@ -16,8 +22,9 @@ internal static class Docker
     private static string? Detect()
     {
         const string Missing =
-            "No Docker daemon was found, so the SQL Server tests cannot run. Start Docker Desktop " +
-            "(or set DOCKER_HOST) and run the tests again; the rest of the suite does not need it.";
+            "No Docker daemon was found, so the tests that need a real store cannot run. Start " +
+            "Docker Desktop (or set DOCKER_HOST) and run the tests again; the rest of the suite " +
+            "does not need it.";
 
         // An explicit endpoint is taken at face value: whoever set it knows better than this probe.
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOCKER_HOST")))
