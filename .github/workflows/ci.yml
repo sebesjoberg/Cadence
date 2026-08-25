@@ -25,12 +25,12 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      # global.json is the single source of truth for the SDK, so CI and a developer machine cannot
-      # drift apart without a commit saying so.
+      # global.json names the minimum SDK, not an exact one: rollForward is latestFeature, so a newer
+      # feature band on the runner is fine. Raising the floor is a deliberate commit.
       - name: Install the pinned SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
