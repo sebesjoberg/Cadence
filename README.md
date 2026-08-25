@@ -47,6 +47,25 @@ rely on it: `OverlapPolicy.Skip` is strict within an instance and best-effort ac
 cluster. If a long run is in flight on instance A and instance B claims the next
 occurrence, B runs it.
 
+## Pausing
+
+Two switches, held in the storage tier and read by every instance:
+
+```csharp
+await pauses.SetAsync(PauseScope.Schedule, "payment gateway incident", "ops@example.com", ct);
+```
+
+`PauseScope.Schedule` stops the tick loop claiming occurrences. `PauseScope.Triggers` refuses
+manual and API runs. They are independent on purpose: during an incident the usual thing to want is
+automatic work stopped and the ability to still run one job by hand. `PauseScope.All` closes both,
+`PauseScope.None` reopens them.
+
+A pause reaches other instances on the same change detection schedule edits use — within one poll
+interval on SQL Server, pushed on Redis. Paused occurrences are treated as never having existed, so
+resuming starts from the next one and replays nothing.
+
+With no storage package the switches live in the process, which is all there is to pause.
+
 ## Layering
 
 | Call | Gets you | Needs |
@@ -111,10 +130,11 @@ The Redis tier has no equivalent, and no migrator, application lock or reviewabl
 folder either. A key exists once something writes it, which removes the question rather
 than answering it.
 
-**Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is
-complete, with both tiers held to one conformance suite that runs against a real server in
-CI. An Aspire multi-replica sample comes next, then v0.3, the control surface. Not yet
-published to NuGet.
+**Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is complete,
+with both tiers held to one conformance suite that runs against a real server in CI, and the Aspire
+multi-replica sample demonstrates it between real processes. v0.3, the control surface, is under
+way: distributed pause has landed, and the HTTP API and its auth gate follow. Not yet published to
+NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

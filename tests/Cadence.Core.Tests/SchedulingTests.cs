@@ -177,6 +177,68 @@ public class SchedulingTests
         Assert.Equal(Occurrences.Utc(2026, 8, 24, 14, 0), run.ScheduledFor);
     }
 
+    [Fact]
+    public async Task APausedScheduleClaimsNothing()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.Pauses.SetAsync(PauseScope.Schedule, "incident", "ops", default);
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));   // 11:00 would be due
+
+        Assert.Empty(await host.RunsAsync());
+    }
+
+    [Fact]
+    public async Task ResumingDoesNotReplayThePausedWindow()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.Pauses.SetAsync(PauseScope.Schedule, "incident", "ops", default);
+
+        await host.AdvanceAndTickAsync(TimeSpan.FromHours(3));      // 11:00, 12:00, 13:00 pass
+        await host.Pauses.SetAsync(PauseScope.None, reason: null, setBy: null, default);
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(31));   // 14:00
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 14, 0), run.ScheduledFor);
+    }
+
+    [Fact]
+    public async Task PausingTriggersLeavesTheScheduleRunning()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.Pauses.SetAsync(PauseScope.Triggers, "incident", "ops", default);
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        Assert.Single(await host.RunsAsync());
+
+        await Assert.ThrowsAsync<SchedulerPausedException>(
+            () => host.Trigger.TriggerAsync("scheduled-job"));
+    }
+
+    [Fact]
+    public async Task PausingTheScheduleLeavesTriggersWorking()
+    {
+        await using var host = TickHost.Create(Hourly);
+
+        await host.TickAsync();
+        await host.Pauses.SetAsync(PauseScope.Schedule, "incident", "ops", default);
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        var result = await host.Trigger.TriggerAsync("scheduled-job");
+        await host.WaitForIdleAsync();
+
+        Assert.True(result.WasStarted);
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Null(run.ScheduledFor);
+        Assert.Equal(TriggerKind.Manual, run.Trigger);
+    }
+
     private sealed class TickHost : IAsyncDisposable
     {
         private ServiceProvider _provider = null!;
@@ -190,6 +252,10 @@ public class SchedulingTests
 
         public InMemoryRunHistoryStore History { get; } = new();
 
+        public InMemoryPauseStore Pauses { get; private set; } = null!;
+
+        public JobTrigger Trigger { get; private set; } = null!;
+
         public static TickHost Create(
             string codeCron,
             string? storedCron = null,
@@ -199,10 +265,13 @@ public class SchedulingTests
             string? secondJobCron = null,
             int? maxConcurrentRuns = null)
         {
+            var clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 10, 30));
+
             var host = new TickHost
             {
                 Coordinator = new ScriptedCoordinator(grantClaims),
-                _clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 10, 30)),
+                Pauses = new InMemoryPauseStore(clock),
+                _clock = clock,
             };
 
             var descriptors = new List<JobDescriptor>
@@ -212,6 +281,7 @@ public class SchedulingTests
                     Name = "scheduled-job",
                     ImplementationType = typeof(SucceedingJob),
                     DefaultCron = codeCron,
+                    AllowedTriggers = TriggerKind.Schedule | TriggerKind.Manual,
                     OnMissed = onMissed,
                 },
             };
@@ -265,12 +335,14 @@ public class SchedulingTests
                 NullLogger<JobExecutor>.Instance);
 
             var resolver = new ScheduleResolver(registry, host.Source);
+            host.Trigger = new JobTrigger(registry, resolver, host.Pauses, host._executor);
 
             host._ticker = new ScheduleTicker(
                 registry,
                 resolver,
                 host.Coordinator,
                 host.History,
+                host.Pauses,
                 host._executor,
                 new LastSuccessCache(host._clock),
                 host._clock,
@@ -292,6 +364,8 @@ public class SchedulingTests
             _clock.Advance(by);
             await TickAsync();
         }
+
+        public Task WaitForIdleAsync() => _executor.WaitForIdleAsync();
 
         public async Task<IReadOnlyList<JobRun>> RunsAsync()
             => await History.QueryAsync(new RunQuery { Limit = 100 }, CancellationToken.None);

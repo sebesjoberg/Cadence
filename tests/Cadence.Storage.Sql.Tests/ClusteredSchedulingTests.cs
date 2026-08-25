@@ -120,6 +120,28 @@ public sealed class ClusteredSchedulingTests
         Assert.Equal(0, cluster.TotalExecutions);
     }
 
+    [SkippableFact]
+    public async Task APauseSetOnOneInstanceStopsEveryInstanceClaiming()
+    {
+        await using var cluster = await Cluster.CreateAsync(_fixture, instances: 2);
+
+        await cluster.TickAllAsync();
+
+        await cluster.Pauses[0].SetAsync(PauseScope.Schedule, "incident", "ops", default);
+
+        await cluster.AdvanceAndTickAllAsync(TimeSpan.FromMinutes(30));   // 11:00 would be due
+
+        Assert.Empty(await cluster.RunsAsync());
+        Assert.Equal(0, cluster.TotalExecutions);
+
+        // And resuming picks up from the next occurrence, not from the one that was paused through.
+        await cluster.Pauses[0].SetAsync(PauseScope.None, reason: null, setBy: null, default);
+        await cluster.AdvanceAndTickAllAsync(TimeSpan.FromHours(1));      // 12:00
+
+        var run = Assert.Single(await cluster.RunsAsync());
+        Assert.Equal(Occurrence.AddHours(1), run.ScheduledFor);
+    }
+
     /// <summary>
     /// A set of independent Cadence instances over one database.
     /// </summary>
@@ -131,6 +153,8 @@ public sealed class ClusteredSchedulingTests
         public IReadOnlyList<string> InstanceIds => [.. _instances.Select(i => i.Id)];
 
         public IReadOnlyList<SqlScheduleSource> Sources => [.. _instances.Select(i => i.Source)];
+
+        public IReadOnlyList<SqlPauseStore> Pauses => [.. _instances.Select(i => i.Pauses)];
 
         /// <summary>How many times the job body actually ran, across every instance.</summary>
         public int TotalExecutions => _instances.Sum(i => i.Counter.Count);
@@ -239,6 +263,7 @@ public sealed class ClusteredSchedulingTests
             JobExecutor Executor,
             SqlRunHistoryStore History,
             SqlScheduleSource Source,
+            SqlPauseStore Pauses,
             ExecutionCounter Counter,
             ServiceProvider Provider) : IAsyncDisposable
         {
@@ -275,6 +300,8 @@ public sealed class ClusteredSchedulingTests
                 var coordinator = new SqlOccurrenceCoordinator(
                     database, clock, cadenceOptions, NullLogger<SqlOccurrenceCoordinator>.Instance);
 
+                var pauses = new SqlPauseStore(database, clock);
+
                 var metrics = new CadenceMetrics(provider.GetRequiredService<IMeterFactory>());
                 var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
@@ -292,6 +319,7 @@ public sealed class ClusteredSchedulingTests
                     new ScheduleResolver(registry, source),
                     coordinator,
                     history,
+                    pauses,
                     executor,
                     new LastSuccessCache(clock),
                     clock,
@@ -300,7 +328,7 @@ public sealed class ClusteredSchedulingTests
                     NullLogger<ScheduleTicker>.Instance);
 
                 return new Instance(
-                    instanceId, clock, ticker, executor, history, source, counter, provider);
+                    instanceId, clock, ticker, executor, history, source, pauses, counter, provider);
             }
 
             public async ValueTask DisposeAsync()

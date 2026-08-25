@@ -156,3 +156,35 @@ internal sealed class FixedClock : ISystemClock
 
     public void Advance(TimeSpan by) => UtcNow += by;
 }
+
+/// <summary>Runs the shared pause contract against Redis.</summary>
+[Collection(RedisCollectionDefinition.Name)]
+public sealed class RedisPauseStoreConformanceTests : PauseStoreConformance, IAsyncDisposable
+{
+    private readonly RedisFixture _fixture;
+    private readonly List<RedisConnection> _connections = [];
+
+    private RedisStorageOptions? _shared;
+
+    public RedisPauseStoreConformanceTests(RedisFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override Task<IPauseStore> CreateAsync()
+    {
+        _shared ??= _fixture.CreateOptions("pause");
+
+        var connection = new RedisConnection(_shared);
+        _connections.Add(connection);
+
+        return Task.FromResult<IPauseStore>(new RedisPauseStore(connection, new FixedClock()));
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var connection in _connections)
+        {
+            await connection.DisposeAsync();
+        }
+    }
+}

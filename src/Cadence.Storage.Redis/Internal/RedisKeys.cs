@@ -104,6 +104,9 @@ internal sealed class RedisKeys
     /// <summary>ZSET of instance id scored by last heartbeat instant.</summary>
     public RedisKey Heartbeats => $"{_prefix}instances:beat";
 
+    /// <summary>HASH holding the cluster-wide pause switches.</summary>
+    public RedisKey Pause => $"{_prefix}pause";
+
     /// <summary>HASH of job name to its stored schedule, version excluded.</summary>
     public RedisKey Schedules => $"{_prefix}schedules";
 

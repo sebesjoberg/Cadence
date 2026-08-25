@@ -66,6 +66,7 @@ public static class CadenceServiceCollectionExtensions
         services.TryAddSingleton<IScheduleSource, CodeScheduleSource>();
         services.TryAddSingleton<IRunHistoryStore>(_ => new InMemoryRunHistoryStore());
         services.TryAddSingleton<IOccurrenceCoordinator, NoOpOccurrenceCoordinator>();
+        services.TryAddSingleton<IPauseStore, InMemoryPauseStore>();
         services.TryAddSingleton<IJobProgressSink, RunHistoryProgressSink>();
 
         services.TryAddSingleton<CadenceMetrics>();

@@ -110,3 +110,23 @@ internal sealed class FixedClock : ISystemClock
 
     public void Advance(TimeSpan by) => UtcNow += by;
 }
+
+/// <summary>Runs the shared pause contract against SQL Server.</summary>
+[Collection(SqlServerCollectionDefinition.Name)]
+public sealed class SqlPauseStoreConformanceTests : PauseStoreConformance
+{
+    private readonly SqlServerFixture _fixture;
+    private SqlStorageOptions? _shared;
+
+    public SqlPauseStoreConformanceTests(SqlServerFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override async Task<IPauseStore> CreateAsync()
+    {
+        // One database per test, shared by every store the test creates, so "another instance"
+        // means another instance rather than another database.
+        _shared ??= await _fixture.CreateMigratedAsync("pause");
+
+        return new SqlPauseStore(new SqlDatabase(_shared), new FixedClock());
+    }
+}
