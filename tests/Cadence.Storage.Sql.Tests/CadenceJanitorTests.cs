@@ -264,8 +264,21 @@ public sealed class CadenceJanitorTests
             Retention = retention ?? new RetentionOptions(),
         });
 
+        // The janitor is tier-neutral now; what makes this a SQL test is the maintenance
+        // implementation handed to it, and the real database behind that.
+        var janitorOptions = new JanitorOptions
+        {
+            Interval = options.JanitorInterval,
+            BatchSize = options.JanitorBatchSize,
+            HeartbeatTimeout = options.HeartbeatTimeout,
+        };
+
         var janitor = new CadenceJanitor(
-            database, history, options, clock, cadence, NullLogger<CadenceJanitor>.Instance);
+            new SqlStorageMaintenance(database, history),
+            janitorOptions,
+            clock,
+            cadence,
+            NullLogger<CadenceJanitor>.Instance);
 
         return new Harness(database, history, janitor, options);
     }

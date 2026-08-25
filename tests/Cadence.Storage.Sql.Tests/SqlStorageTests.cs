@@ -1,3 +1,4 @@
+using Cadence.Storage.Conformance;
 using Cadence.Storage.Sql.Internal;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -136,7 +137,7 @@ public sealed class SqlStorageTests
             failure a scheduler can have, because it is invisible. So only 2601 and 2627 may ever
             become false, and everything else has to propagate.
         */
-        Skip.If(Docker.SkipReason is not null, Docker.SkipReason ?? string.Empty);
+        Skip.If(DockerDaemon.SkipReason is not null, DockerDaemon.SkipReason ?? string.Empty);
 
         var options = new SqlStorageOptions
         {
