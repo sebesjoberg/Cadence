@@ -66,5 +66,7 @@ secrets.json
 Thumbs.db
 desktop.ini
 
-## Working design notes — kept local, not part of the shipped repo
-docs/
+## Documentation is part of the repo — docs/ explains why things are the way they are, and the
+## README links into it. What stays out is working scratch: implementation plans and agent notes
+## live outside the repository entirely, and anything dropped here for a single task stays local.
+docs/scratch/
