@@ -74,7 +74,9 @@ by hand and then leaving `AutoMigrate` on is harmless.
 Instances that boot together all try to migrate; the first wins an application lock and
 the rest wait, then find nothing to do.
 
-**Status:** pre-release, v0.2 in progress. Not yet published to NuGet.
+**Status:** pre-release. v0.2 — persistence and clustering on SQL Server — is complete and
+covered by a conformance suite that runs against a real SQL Server in CI. A Redis tier and an
+Aspire multi-replica sample come next, then v0.3, the control surface. Not yet published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 
