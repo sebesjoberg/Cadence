@@ -157,18 +157,33 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | | Milestone | Contents |
 |---|---|---|
 | **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain |
-| **v0.2** | Persistence & clustering | SQL claim, run history, janitor, instance registry, Redis — *SQL half done; Redis and the Aspire host split into their own branches* |
-| — | **decision point** | ↓ |
-| v0.3 | Control surface | API, writable schedule source, change tokens |
+| **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*; the Aspire host follows on its own branch before v0.3 |
+| — | **decision point** | *resolved — see below* |
+| v0.3 | Control surface | API, the auth gate, distributed pause — *the writable schedule source and change tokens landed early, in v0.2* |
 | v0.4 | Dashboard | overview, detail, schedule editing, manual trigger |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
 
-**The decision point after v0.2 is real and should be planned for, not discovered.**
-If the coordination layer costs more than budgeted, build v0.3–v0.5 on top of
-Quartz.NET's clustering instead. `IOccurrenceCoordinator` is the only seam that would
-have to change — keep it that way, and keep nothing else in the codebase aware of how
-a claim is won.
+### The decision point, resolved: keep the coordinator
+
+The question was whether to build v0.3–v0.5 on Quartz.NET's clustering instead, should our
+own coordination layer overrun its budget. It did not. The whole cost:
+
+- one filtered unique index, `UX_CadenceJobRun_Occurrence`, on a table run history needed anyway
+- `SqlOccurrenceCoordinator`, whose `TryClaimAsync` is an `INSERT` and a check for 2601/2627
+- a conformance suite, which both tiers are held to rather than only the SQL one
+
+What it bought is in `ClusteredSchedulingTests`: two and five instances ticking against a real
+SQL Server with one run per occurrence, successive occurrences landing on different instances,
+and a schedule edited through one instance reaching the others.
+
+Quartz would trade that for a dependency, a second scheduling model to reconcile with this one,
+and misfire semantics we do not control. **Keep the coordinator.** `IOccurrenceCoordinator` stays
+the only seam that knows how a claim is won — no longer because we might swap it wholesale, but
+because a second tier has to slot in underneath it without Core noticing.
+
+It since has. The Redis tier needed no change to that interface, which was the test set for it
+here; what it did move was the janitor, and §11.2 records why.
 
 ---
 
@@ -283,22 +298,31 @@ carrying `JobName`/`RunId`/`InstanceId` as scope attributes, a `cadence.job` spa
 the §14 tags and a `cadence.job.progress` event, and the metrics including
 `seconds_since_success`.
 
-### The Aspire version is blocked, and on what
+### The Aspire version: one blocker cleared, one standing
 
 The target sample — Aspire orchestrating SQL Server, two worker replicas contending for
-the same occurrences, the dashboard rendering history — needs:
+the same occurrences, the dashboard rendering history — was blocked on two things:
 
-| Blocker | Milestone | Why it's load-bearing for the sample |
+| Blocker | Milestone | Status |
 |---|---|---|
-| `Cadence.Storage.Sql` | v0.2 | Without the unique-index claim, two replicas both run every occurrence, so the sample would demonstrate the bug rather than the guarantee |
-| `Cadence.Dashboard` | v0.4 | The history sink has no reader; in-memory history is per-instance and dies with the process |
+| `Cadence.Storage.Sql` | v0.2 | **Cleared.** Without the unique-index claim, two replicas both run every occurrence, so the sample would have demonstrated the bug rather than the guarantee |
+| `Cadence.Dashboard` | v0.4 | Standing. The history sink has no reader, and in-memory history is per-instance and dies with the process — so the first Aspire host reads history from the log, not a UI |
 
-Two consequences worth acting on when v0.2 lands:
+**The first of the two consequences recorded here was wrong, and the correction matters.**
+It read: *"The Aspire host is where clustering gets proven — N replicas, one run per
+occurrence, cannot be tested in-process against `NoOpCoordinator`."* The premise is right
+and the conclusion does not follow. `NoOpCoordinator` is not the only alternative: five
+instances can share one `SqlOccurrenceCoordinator` against a real SQL Server inside one
+test process, which is exactly what `ClusteredSchedulingTests` does. Clustering was proven
+there, in seconds, on every CI run — where an Aspire host proves it once, by hand, for
+whoever is watching the logs at the time.
 
-1. **The Aspire host is where clustering gets proven.** "N replicas, one run per
-   occurrence" cannot be tested in-process against `NoOpCoordinator` — the conformance
-   hammer test (§17) needs a real store. Build the Aspire host as part of v0.2, not as
-   a v0.4 nicety.
+So the Aspire host is a **demonstration**, not the proof, and it should be built for what
+only it can show:
+
+1. **Real process boundaries.** Separate processes, separate `InstanceId`s, a real network
+   between them and the database, and a replica that can be killed mid-run to watch the
+   janitor reap it. The in-process test deliberately fakes all of that away.
 2. **Two replicas will expose the `Skip` caveat immediately.** A long-running job on
    replica A, next occurrence claimed by replica B, `Skip` configured, and the job runs
    anyway. Better to see that in a sample we control than in someone's incident.

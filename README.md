@@ -111,7 +111,10 @@ The Redis tier has no equivalent, and no migrator, application lock or reviewabl
 folder either. A key exists once something writes it, which removes the question rather
 than answering it.
 
-**Status:** pre-release, v0.2 in progress. Not yet published to NuGet.
+**Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is
+complete, with both tiers held to one conformance suite that runs against a real server in
+CI. An Aspire multi-replica sample comes next, then v0.3, the control surface. Not yet
+published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 
