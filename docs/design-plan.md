@@ -302,3 +302,59 @@ Two consequences worth acting on when v0.2 lands:
 2. **Two replicas will expose the `Skip` caveat immediately.** A long-running job on
    replica A, next occurrence claimed by replica B, `Skip` configured, and the job runs
    anyway. Better to see that in a sample we control than in someone's incident.
+
+---
+
+## 11. Two storage tiers, and what the second one proved
+
+`Cadence.Storage.Redis` implements the same three interfaces as the SQL tier and is held to
+the same three conformance suites. It is an **alternative**, not a layer: both replace the
+same services, so calling both leaves whichever ran last winning on some and not others.
+
+### 11.1 The claim is still the run
+
+The obvious Redis coordinator is `SET key NX EX 60`, and it is wrong for this. A claim that
+expires is a claim that can be won twice — not inside the tick's horizon, but by anything
+replaying an older occurrence, which is exactly what catch-up after downtime does. §3.2 gets
+its property in SQL from the claim being a permanent row; a tier whose claims quietly stop
+existing after a minute is not an alternative to that, it is a different guarantee wearing
+the same interface.
+
+So the Redis claim is permanent too, written by the same Lua script as the run's hash and
+its index entries, and removed by the janitor with the run it belongs to. Retention therefore
+bounds how far back double-execution is prevented — thirty days by default — and both tiers
+behave identically, because in both the claim *is* the run.
+
+### 11.2 The seam held, and one thing had to move
+
+`IOccurrenceCoordinator` needed no change, which was the test §6 set for it.
+
+The janitor did. It lived in `Cadence.Storage.Sql`, calling that store's internal maintenance
+methods, and Redis needed the same four passes over a completely different set of operations.
+Rather than a second copy of the policy — reap before purge, batch, never escalate a failure
+into a scheduling problem — the policy moved to `Cadence.Core` behind `IStorageMaintenance`,
+and each tier now supplies only the operations. That is the shape §6 asked for and the
+coordinator alone would not have revealed: the seam that mattered second was the one nobody
+had named.
+
+### 11.3 Where the tiers genuinely differ
+
+Not in behaviour — the conformance suites are the point — but in operations:
+
+| | SQL Server | Redis |
+|---|---|---|
+| Durability | a committed run is committed | whatever the Redis is configured for |
+| Schema | migrator, application lock, reviewable scripts | none; keys appear when written |
+| Query surface | any filter, indexed | fast by job, instance and time; status alone walks the index |
+| Schedule changes | polled | pushed, with the poll kept as a backstop |
+
+**Durability is the deciding one, and the README says so plainly rather than selling the
+tier.** With Redis's defaults a restart can lose recent writes, claims included, which is
+the one failure the coordinator exists to prevent. Anyone choosing Redis is trading a bounded
+window of double-execution risk for not running a database, and should be told that in those
+words before they choose.
+
+The pushed schedule change is the one place Redis is straightforwardly better: an edit
+reaches other instances in milliseconds instead of within a poll interval. The poll stays
+anyway — Redis pub/sub is fire-and-forget with no redelivery, and a scheduler that silently
+stopped noticing schedule edits would look perfectly healthy while ignoring the dashboard.

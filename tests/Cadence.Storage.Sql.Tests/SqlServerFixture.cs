@@ -1,3 +1,4 @@
+using Cadence.Storage.Conformance;
 using Cadence.Storage.Sql.Internal;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,7 +35,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
-        if (Docker.SkipReason is { } noDocker)
+        if (DockerDaemon.SkipReason is { } noDocker)
         {
             SkipReason = noDocker;
             return;
