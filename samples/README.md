@@ -20,8 +20,8 @@ Progress a job reports fans out to three places, and the sample shows all three 
 
 | Path | What you see |
 |---|---|
-| **MEL** (`ILogger`) | `info: ...HelloThereJob[0] Hello there, Tony!` on the console |
-| **OTel logs** | the same record with `JobName`, `RunId`, `InstanceId` as scope attributes |
+| **MEL** (`ILogger`) | `info: ...HelloThereJob[1] Hello there, Tony!` on the console |
+| **OTel logs** | the same record with `Body` still the template `Hello there, {Name}!`, `Name` as a structured attribute, `EventName` `Greeted`, and `JobName` / `RunId` / `InstanceId` as scope attributes |
 | **OTel traces** | a `cadence.job` span, tagged `job.name` / `job.run_id` / `job.trigger` / `job.scheduled_for` / `job.status`, carrying a `cadence.job.progress` event |
 | **OTel metrics** | `cadence.runs`, `cadence.run.duration`, `cadence.job.seconds_since_success` |
 | **Run history** | the dashboard's sink — in-memory here, since the dashboard itself is v0.4 |

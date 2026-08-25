@@ -6,10 +6,6 @@
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <RootNamespace>Cadence.Sample.Worker</RootNamespace>
-    <!-- The sample should read like consumer code, and a consumer writes logger.LogInformation(...)
-         rather than a source-generated LoggerMessage. Cadence's own assemblies still enforce both
-         of these; a sample that enforced them would be teaching the wrong lesson. -->
-    <NoWarn>$(NoWarn);CA1848;CA1873</NoWarn>
   </PropertyGroup>
 
   <!--

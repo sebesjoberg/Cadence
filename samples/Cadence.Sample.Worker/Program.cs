@@ -59,7 +59,6 @@ var host = builder.Build();
 
 host.Services.GetRequiredService<ILoggerFactory>()
     .CreateLogger("Sample")
-    .LogInformation(
-        "Starting. 'hello-there' runs every 10 seconds; watch for the progress event on each span.");
+    .SampleStarting("hello-there", 10);
 
 await host.RunAsync();

@@ -20,7 +20,7 @@ public sealed class HelloThereJob(IGreetingService greetings, ILogger<HelloThere
 
         // The job's own logger. Cadence has already opened a scope carrying JobName, RunId and
         // InstanceId, so this line is correlated without the job author doing anything.
-        logger.LogInformation("Hello there, {Name}!", name);
+        logger.Greeted(name);
 
         // Progress goes three places at once: an event on this run's activity, the MEL pipeline
         // (and therefore any OTLP log exporter), and run history for the dashboard to read back.
