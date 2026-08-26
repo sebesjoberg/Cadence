@@ -51,9 +51,11 @@ purposes. For clustering, see the next sample.
 
 ## Cadence.Sample.AppHost
 
-.NET Aspire orchestrating a SQL Server container and **three replicas of one worker**, all claiming
-occurrences out of the same database. This is the sample that shows the guarantee on the README's
-first screen — *at most one instance starts a given occurrence* — happening between real processes.
+.NET Aspire orchestrating a SQL Server container, **three replicas of one worker** all claiming
+occurrences out of the same database, and `Cadence.Sample.Api` mounted over that same database. This
+is the sample that shows the guarantee on the README's first screen — *at most one instance starts a
+given occurrence* — happening between real processes, and the one place where the control surface
+answers about work it did not do.
 
 ```powershell
 ./scripts/pack.ps1                              # build the local feed
@@ -66,7 +68,7 @@ log record, span and metric with `JobName`, `RunId` and `InstanceId`, so "which 
 answerable without `Cadence.Dashboard`, which is v0.4 and would add schedule editing and a history
 view rather than visibility.
 
-Two jobs run:
+Two jobs run on the replicas — the API resource brings three more of its own:
 
 | Job | Cron | What it is for |
 |---|---|---|
@@ -107,6 +109,31 @@ starts winning claims immediately.
 Measured on the run this sample was written against: killed at 08:23:35 mid-sweep, marked `Lost` at
 08:23:56, and the surviving replica had taken over by the next occurrence at 08:23:40.
 
+### The control surface, answering about other processes
+
+The `api` resource in the dashboard is `Cadence.Sample.Api`, pointed at the same database by
+`WithReference(database)`. Its endpoint is `http://localhost:5233`, clickable in the resource list,
+and the token is the one in that sample's `appsettings.Development.json`.
+
+Two responses are worth asking for, because they answer differently:
+
+```powershell
+$b = 'http://localhost:5233'
+$t = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs?job=tick-tock&limit=1"
+curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/jobs"
+```
+
+`GET /runs` comes back with runs whose `instanceId` is `worker-…` — history is the cluster's, and
+this process is reading what the replicas executed. `GET /jobs` comes back with only the API's own
+three jobs, because the registry is per-process: nothing in the database tells one host about
+another's code. `GET /cadence/api/health/storage` also stops being empty here — it reports the
+`cadence-sql` check the storage package registers.
+
+The API host is a fourth Cadence instance on that database and schedules its own `inventory-sweep`,
+which does not disturb the guarantee above: an occurrence is claimed per job, and only the process
+that registered a job ever evaluates it.
+
 ### Editing a schedule by hand
 
 The dashboard that would do this properly is v0.4, so for now it is SQL — and there is one trap worth
@@ -142,8 +169,9 @@ repository that consumes `Cadence.Storage.Sql` as a NuGet package rather than by
 so it is the first check that the SQL tier packs correctly at all. Run `./scripts/pack.ps1` first, or
 the restore fails.
 
-The one exception is the AppHost's reference to the worker project, which is not consumption — it is
-how Aspire is told which project to launch, and what generates the `Projects.*` type.
+The two exceptions are the AppHost's project references to the worker and the API, which are not
+consumption — they are how Aspire is told which projects to launch, and what generates the
+`Projects.*` types.
 
 ### What it still cannot show
 
@@ -158,10 +186,15 @@ real restarts, and something to look at.
 
 ## Cadence.Sample.Api
 
-A minimal `WebApplication` that mounts the v0.3 control surface over the in-memory stores. The two
-worker samples have no HTTP server, so before this one there was nowhere for `MapCadenceApi()` to
-mount and nothing in the repository that drove the endpoints, the token scheme or the health split
-by hand. That is all this sample is for.
+A minimal `WebApplication` that mounts the v0.3 control surface. The two worker samples have no HTTP
+server, so before this one there was nowhere for `MapCadenceApi()` to mount and nothing in the
+repository that drove the endpoints, the token scheme or the health split by hand. That is all this
+sample is for.
+
+It has two shapes, and `ConnectionStrings:cadence` is the whole difference: absent, it uses the
+in-memory stores and needs no infrastructure; present — which is what `Cadence.Sample.AppHost`
+injects — it calls `UseSqlStorage` and shares a database with the three worker replicas. Which one
+it chose is the first line it logs.
 
 ```powershell
 ./scripts/pack.ps1                               # build the local feed
@@ -172,6 +205,11 @@ It listens on `http://localhost:5233` (`Urls` in `appsettings.json`) and
 `Properties/launchSettings.json` puts it in `Development`, which is what lets the token in
 `appsettings.Development.json` be found at all.
 
+`Development` also gets an OpenAPI document at `/openapi/v1.json` and Swagger UI over it at
+`/swagger` — the document comes from the framework's `AddOpenApi()`, and `Cadence.Api` declares each
+route's statuses and response shapes itself, so the schemas are the real ones. The **Authorize**
+button takes the token above.
+
 Three jobs exist only so the endpoints have something to talk about:
 
 | Job | Cron | Triggers | Why it is here |
@@ -180,10 +218,11 @@ Three jobs exist only so the endpoints have something to talk about:
 | `reindex-catalog` | none | `Api, Manual` | the trigger-only shape — no cron, no next occurrence |
 | `nightly-report` | `0 3 * * *` | `Schedule` | refuses an API trigger, so the 400 is reachable |
 
-**In-memory stores, no OpenTelemetry.** The same reasoning as `Cadence.Sample.Worker`, applied in
-the other direction: that sample owns the telemetry story and the AppHost owns SQL, so adding either
-here would blur what this one shows. The visible cost is `GET /health/storage` answering `Healthy`
-over an empty list of checks, which is worth seeing in its own right — see below.
+**No OpenTelemetry, in either shape.** `Cadence.Sample.Worker` owns the telemetry story, and adding
+it here would blur what this one shows; under the AppHost the console logs still reach the dashboard.
+Every response below was captured standalone, where `GET /health/storage` answers `Healthy` over an
+empty list of checks — worth seeing in its own right, and see the AppHost section for the same route
+reporting a real one.
 
 ### The token
 
@@ -520,11 +559,12 @@ embarrassing rather than exploitable.
 
 ### What it does not show
 
-Persistence, clustering, telemetry, and schedule writes.
+Telemetry and schedule writes — and, run on its own, persistence and clustering.
 
-The first three are deliberate: run history here is a per-process ring, so restarting the sample
-empties `GET /runs`, and one instance means every `instanceId` in every response is the same string.
-`Cadence.Sample.AppHost` is where those responses come from three replicas sharing a database.
+Standalone, run history is a per-process ring, so restarting empties `GET /runs`, and one instance
+means every `instanceId` in every response is the same string. Launched by
+`Cadence.Sample.AppHost` it is neither: the responses come out of a database three worker replicas
+are also writing to.
 
 Schedule writes are not on this tree at all, and no sample can show them: a token may start work and
 stop it, while only a person changes *when* work happens. Editing a schedule is SQL by hand until
