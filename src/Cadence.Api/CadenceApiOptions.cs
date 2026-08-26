@@ -10,8 +10,9 @@ public sealed class CadenceApiOptions
     public string BasePath { get; set; } = "/cadence";
 
     /// <summary>
-    /// Tokens accepted as <c>Authorization: Bearer</c>. Also populated from
-    /// <c>CADENCE_API_TOKEN</c> and <c>Cadence:Api:Tokens</c>.
+    /// Tokens accepted as <c>Authorization: Bearer</c>. Configuring one satisfies the mapping gate.
+    /// Binding from <c>CADENCE_API_TOKEN</c> and <c>Cadence:Api:Tokens</c> is not wired yet, so for
+    /// now these are set in code.
     /// </summary>
     public IList<string> Tokens { get; } = [];
 
