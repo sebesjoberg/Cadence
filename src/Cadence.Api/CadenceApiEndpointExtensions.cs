@@ -96,6 +96,19 @@ public static class CadenceApiEndpointExtensions
             // to AllowUnauthenticated, where a proxy or mesh in front makes every caller legitimately
             // non-loopback -- that flag is an operator's decision and carries its own warning.
             group.AddEndpointFilter<LoopbackOnlyFilter>();
+            group.ProducesProblem(StatusCodes.Status403Forbidden);
+        }
+
+        // Exactly the two branches above that apply a policy, and not the group: under
+        // AllowUnauthenticated nothing authenticates, so a 401 in the document would promise a
+        // response the deployment cannot send. typeof(void), not null -- the challenge carries no
+        // body, and the API explorer drops a null-typed entry, which is why Produces() substitutes
+        // typeof(void) itself.
+        if (authenticated)
+        {
+            group.WithMetadata(new ProducesResponseTypeMetadata(
+                StatusCodes.Status401Unauthorized,
+                typeof(void)));
         }
 
         // Every handler with a body returns JsonHttpResult<T>, so the responses go out through the
