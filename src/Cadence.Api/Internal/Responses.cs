@@ -1,4 +1,5 @@
 using Cadence.Storage;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Cadence.Api.Internal;
 
@@ -40,6 +41,20 @@ internal static class Responses
         state.Reason,
         state.SetBy,
         Utc(state.SetAtUtc));
+
+    /// <summary>Projects a health report as the storage answer.</summary>
+    /// <param name="report">The report, already filtered to the storage checks.</param>
+    public static StorageHealthResponse ToStorageHealth(HealthReport report) => new(
+        report.Status.ToString(),
+        [.. report.Entries.Select(entry => new StorageCheckResponse(
+            entry.Key,
+            entry.Value.Status.ToString(),
+            entry.Value.Description,
+
+            // The message, not the whole exception. A stack trace on this route would be a stack
+            // trace on a dashboard, and the message is what names the host that stopped answering.
+            entry.Value.Exception?.Message,
+            entry.Value.Duration))]);
 
     /// <summary>Normalizes an optional instant to UTC, so a <c>...Utc</c> field is one.</summary>
     /// <param name="instant">The instant, or null.</param>

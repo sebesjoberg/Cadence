@@ -10,6 +10,9 @@ namespace Cadence.Storage.Sql;
 /// <summary>Adds SQL Server persistence and clustering to Cadence.</summary>
 public static class CadenceSqlStorageExtensions
 {
+    /// <summary>The tag the storage health check is registered under.</summary>
+    private const string StorageHealthTag = "cadence.storage";
+
     /// <summary>
     /// Moves schedules, run history and occurrence claiming into SQL Server.
     /// </summary>
@@ -52,6 +55,18 @@ public static class CadenceSqlStorageExtensions
 
         services.TryAddSingleton(options);
         services.TryAddSingleton(sp => new SqlDatabase(sp.GetRequiredService<SqlStorageOptions>()));
+
+        // Guarded because AddCheck appends unconditionally and the health check service rejects
+        // duplicate names: without this, a second UseSqlStorage call -- which every other
+        // registration here already tolerates -- would throw on the first resolve of
+        // HealthCheckService. The check's own singleton is the marker.
+        if (!services.Any(service => service.ServiceType == typeof(SqlStorageHealthCheck)))
+        {
+            services.AddSingleton<SqlStorageHealthCheck>();
+
+            services.AddHealthChecks()
+                .AddCheck<SqlStorageHealthCheck>("cadence-sql", tags: [StorageHealthTag]);
+        }
 
         // Replace, not TryAdd: AddCadence offers its in-memory defaults with TryAdd after the
         // configuration callback has run, so whatever is registered here wins.

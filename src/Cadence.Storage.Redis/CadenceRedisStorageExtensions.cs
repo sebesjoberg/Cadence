@@ -10,6 +10,9 @@ namespace Cadence.Storage.Redis;
 /// <summary>Adds Redis persistence and clustering to Cadence.</summary>
 public static class CadenceRedisStorageExtensions
 {
+    /// <summary>The tag the storage health check is registered under.</summary>
+    private const string StorageHealthTag = "cadence.storage";
+
     /// <summary>
     /// Moves schedules, run history and occurrence claiming into Redis.
     /// </summary>
@@ -58,6 +61,18 @@ public static class CadenceRedisStorageExtensions
 
         services.TryAddSingleton(options);
         services.TryAddSingleton(sp => new RedisConnection(sp.GetRequiredService<RedisStorageOptions>()));
+
+        // Guarded because AddCheck appends unconditionally and the health check service rejects
+        // duplicate names: without this, a second UseRedisStorage call -- which every other
+        // registration here already tolerates -- would throw on the first resolve of
+        // HealthCheckService. The check's own singleton is the marker.
+        if (!services.Any(service => service.ServiceType == typeof(RedisStorageHealthCheck)))
+        {
+            services.AddSingleton<RedisStorageHealthCheck>();
+
+            services.AddHealthChecks()
+                .AddCheck<RedisStorageHealthCheck>("cadence-redis", tags: [StorageHealthTag]);
+        }
 
         // Replace, not TryAdd: AddCadence offers its in-memory defaults with TryAdd after the
         // configuration callback has run, so whatever is registered here wins.

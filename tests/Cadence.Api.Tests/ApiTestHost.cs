@@ -62,6 +62,7 @@ internal sealed class ApiTestHost : IAsyncDisposable
                 app.UseEndpoints(routes =>
                 {
                     routes.MapCadenceApi();
+                    routes.MapCadenceHealth();
                     endpoints?.Invoke(routes);
                 });
             });

@@ -93,6 +93,7 @@ public static class CadenceApiEndpointExtensions
         JobEndpoints.Map(group);
         RunEndpoints.Map(group);
         PauseEndpoints.Map(group);
+        HealthEndpoints.Map(group);
 
         return group;
     }

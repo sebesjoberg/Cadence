@@ -86,3 +86,28 @@ public sealed record PauseResponse(string Scope, string? Reason, string? SetBy, 
 /// <param name="Scope">What to pause. <c>None</c> resumes everything.</param>
 /// <param name="Reason">Free text shown to operators.</param>
 public sealed record PauseRequest(string Scope, string? Reason);
+
+/// <summary>
+/// What the storage tier reports about itself.
+/// </summary>
+/// <remarks>
+/// An explicit shape rather than the framework's <c>HealthReport</c>, which is a storage-shaped type
+/// by another name: returning it would make every field it grows a change to this package's wire
+/// contract.
+/// </remarks>
+/// <param name="Status">The worst status among the checks, or <c>Healthy</c> when there are none.</param>
+/// <param name="Checks">One entry per registered storage check.</param>
+public sealed record StorageHealthResponse(string Status, IReadOnlyList<StorageCheckResponse> Checks);
+
+/// <summary>One storage check's answer.</summary>
+/// <param name="Name">The registration name, such as <c>cadence-sql</c>.</param>
+/// <param name="Status">The status the check reported. A store that is down reports <c>Degraded</c>.</param>
+/// <param name="Description">What the check has to say, in prose.</param>
+/// <param name="Error">The failure's message, or null when the check succeeded.</param>
+/// <param name="Duration">How long the check took — the round trip to the store.</param>
+public sealed record StorageCheckResponse(
+    string Name,
+    string Status,
+    string? Description,
+    string? Error,
+    TimeSpan Duration);

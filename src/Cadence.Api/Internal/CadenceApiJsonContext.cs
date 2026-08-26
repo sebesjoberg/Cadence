@@ -20,5 +20,6 @@ namespace Cadence.Api.Internal;
 [JsonSerializable(typeof(RunPageResponse))]
 [JsonSerializable(typeof(PauseResponse))]
 [JsonSerializable(typeof(PauseRequest))]
+[JsonSerializable(typeof(StorageHealthResponse))]
 [JsonSerializable(typeof(ProblemDetails))]
 internal sealed partial class CadenceApiJsonContext : JsonSerializerContext;
