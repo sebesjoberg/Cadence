@@ -132,9 +132,10 @@ the deploy rather than whoever finds the open endpoint first. Satisfy it one of 
 
 - Configure one or more tokens (below).
 - Call `options.RequireAuthorization("policy")` inside `AddApi(options => ...)` to hand the gate to
-  a policy of your own. The token scheme still authenticates into it under the name
-  `CadenceApiDefaults.AuthenticationScheme`, so an app with its own OIDC setup can accept both by
-  writing one policy.
+  a policy of your own. If you also configure at least one token, that policy can name
+  `CadenceApiDefaults.AuthenticationScheme` and the token scheme authenticates into it — so an app
+  with its own OIDC setup can accept both by writing one policy. Naming that scheme with no token
+  configured leaves it unregistered, and every request answers 500.
 - Set `AllowUnauthenticated = true`, for a deployment a proxy or mesh already authenticates. Logged
   as a warning on every start.
 - Run in `Development`, where mapping proceeds with a loud warning instead of a throw.
