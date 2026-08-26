@@ -23,4 +23,11 @@ public sealed record RunQuery
 
     /// <summary>Rows to skip, for paging.</summary>
     public int Offset { get; init; }
+
+    /// <summary>
+    /// Whether to attach each run's progress entries. Defaults to true, which is what the
+    /// dashboard's run detail needs; a list view sets it false so a capped query does not drag
+    /// every entry of every row along with it.
+    /// </summary>
+    public bool IncludeLog { get; init; } = true;
 }

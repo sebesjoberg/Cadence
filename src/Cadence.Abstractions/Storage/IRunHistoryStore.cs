@@ -23,6 +23,11 @@ public interface IRunHistoryStore
     /// <param name="cancellationToken">Cancels the write.</param>
     Task AppendLogAsync(Guid runId, JobLogEntry entry, CancellationToken cancellationToken);
 
+    /// <summary>One run by id, with its progress entries, or null when no such run exists.</summary>
+    /// <param name="runId">The run to read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<JobRun?> GetAsync(Guid runId, CancellationToken cancellationToken);
+
     /// <summary>The most recent run of a job, whatever its outcome.</summary>
     /// <param name="jobName">The job's stable name.</param>
     /// <param name="cancellationToken">Cancels the read.</param>

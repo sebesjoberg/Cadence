@@ -423,6 +423,66 @@ public abstract class RunHistoryStoreConformance
         Assert.Equal(runId, run.RunId);
     }
 
+    [SkippableFact]
+    public async Task ARunIsRetrievableById()
+    {
+        var store = await CreateAsync();
+        var runId = Guid.NewGuid();
+
+        await store.StartAsync(Start(runId, "job", Origin), default);
+        await store.AppendLogAsync(
+            runId,
+            new JobLogEntry { Timestamp = Origin.AddSeconds(1), Message = "halfway" },
+            default);
+        await SettleAsync(store);
+
+        var run = await store.GetAsync(runId, default);
+
+        Assert.NotNull(run);
+        Assert.Equal(runId, run.RunId);
+        Assert.Equal("job", run.JobName);
+        Assert.Equal("halfway", Assert.Single(run.Log).Message);
+    }
+
+    [SkippableFact]
+    public async Task AnUnknownRunIdReadsBackAsNull()
+    {
+        var store = await CreateAsync();
+
+        Assert.Null(await store.GetAsync(Guid.NewGuid(), default));
+    }
+
+    [SkippableFact]
+    public async Task ExcludingTheLogLeavesEveryOtherFieldIntact()
+    {
+        var store = await CreateAsync();
+        var runId = Guid.NewGuid();
+
+        await store.StartAsync(Start(runId, "job", Origin), default);
+        await store.AppendLogAsync(
+            runId,
+            new JobLogEntry { Timestamp = Origin, Message = "noise" },
+            default);
+        await SettleAsync(store);
+
+        var withLog = Assert.Single(await store.QueryAsync(new RunQuery { JobName = "job" }, default));
+        var without = Assert.Single(
+            await store.QueryAsync(new RunQuery { JobName = "job", IncludeLog = false }, default));
+
+        Assert.Single(withLog.Log);
+        Assert.Empty(without.Log);
+        Assert.Equal(withLog.RunId, without.RunId);
+        Assert.Equal(withLog.JobName, without.JobName);
+        Assert.Equal(withLog.ScheduledFor, without.ScheduledFor);
+        Assert.Equal(withLog.Status, without.Status);
+        Assert.Equal(withLog.Trigger, without.Trigger);
+        Assert.Equal(withLog.InstanceId, without.InstanceId);
+        Assert.Equal(withLog.StartedAt, without.StartedAt);
+        Assert.Equal(withLog.CompletedAt, without.CompletedAt);
+        Assert.Equal(withLog.Duration, without.Duration);
+        Assert.Equal(withLog.Error, without.Error);
+    }
+
     /// <summary>Builds a start record with the fields most tests do not care about filled in.</summary>
     /// <param name="runId">The run id.</param>
     /// <param name="jobName">The job name.</param>

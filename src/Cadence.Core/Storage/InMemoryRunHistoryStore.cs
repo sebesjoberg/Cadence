@@ -93,6 +93,15 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
     }
 
     /// <inheritdoc />
+    public Task<JobRun?> GetAsync(Guid runId, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_byId.TryGetValue(runId, out var run) ? Snapshot(run) : null);
+        }
+    }
+
+    /// <inheritdoc />
     public Task<JobRun?> GetLastRunAsync(string jobName, CancellationToken cancellationToken)
     {
         lock (_gate)
@@ -156,7 +165,7 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
                     .OrderByDescending(r => r.StartedAt)
                     .Skip(Math.Max(0, query.Offset))
                     .Take(Math.Max(0, query.Limit))
-                    .Select(Snapshot),
+                    .Select(run => Snapshot(run, query.IncludeLog)),
             ];
 
             return Task.FromResult(results);
@@ -228,7 +237,7 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
         }
     }
 
-    private static JobRun Snapshot(MutableRun run) => new()
+    private static JobRun Snapshot(MutableRun run, bool includeLog = true) => new()
     {
         RunId = run.RunId,
         JobName = run.JobName,
@@ -240,7 +249,7 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
         CompletedAt = run.CompletedAt,
         Duration = run.Duration,
         Error = run.Error,
-        Log = [.. run.Log],
+        Log = includeLog ? [.. run.Log] : [],
     };
 
     private sealed class MutableRun
