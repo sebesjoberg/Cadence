@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -83,6 +84,15 @@ public sealed class MappingGateTests
         {
             EnvironmentName = environment,
         });
+
+        // CreateSlimBuilder reads the machine environment, so without this an ambient
+        // CADENCE_API_TOKEN on a developer's workstation would decide the gate's answer.
+        foreach (var source in builder.Configuration.Sources
+            .OfType<EnvironmentVariablesConfigurationSource>()
+            .ToList())
+        {
+            builder.Configuration.Sources.Remove(source);
+        }
 
         if (logs is not null)
         {

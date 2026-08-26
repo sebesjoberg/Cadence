@@ -1,6 +1,7 @@
 using Cadence.Api.Internal;
 using Cadence.DependencyInjection;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -47,11 +48,25 @@ public static class CadenceApiBuilderExtensions
                 }
             });
 
-        builder.Services.AddAuthorizationBuilder()
-            .AddPolicy(CadenceTokenDefaults.Policy, policy => policy
-                .AddAuthenticationSchemes(CadenceTokenDefaults.Scheme)
-                .RequireAuthenticatedUser()
-                .RequireClaim(CadenceTokenDefaults.TokenClaim));
+        builder.Services.AddAuthorization();
+
+        // Deferred on the same condition as the scheme: a policy naming a scheme that is not
+        // registered throws when it is evaluated, so the two have to appear and disappear together.
+        // MapCadenceApi selects options.PolicyName ?? (Tokens.Count > 0 ? Policy : null), so with no
+        // token this policy is both absent and unused.
+        builder.Services.AddOptions<AuthorizationOptions>()
+            .Configure<IOptions<CadenceApiOptions>>((authorization, api) =>
+            {
+                if (api.Value.Tokens.Count == 0)
+                {
+                    return;
+                }
+
+                authorization.AddPolicy(CadenceTokenDefaults.Policy, policy => policy
+                    .AddAuthenticationSchemes(CadenceTokenDefaults.Scheme)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim(CadenceTokenDefaults.TokenClaim));
+            });
 
         return builder;
     }

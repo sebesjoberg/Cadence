@@ -33,7 +33,9 @@ public sealed class CadenceApiOptions
     /// <summary>
     /// Requires an authorization policy of the host's own. A named policy governs alone: the token
     /// scheme authenticates into it rather than bypassing it, so a host with its own identity
-    /// provider can accept both by writing one policy.
+    /// provider can accept both by writing one policy. That policy must list
+    /// <see cref="CadenceApiDefaults.AuthenticationScheme"/> among its authentication schemes:
+    /// Cadence makes it no host's default scheme, so a policy naming none authenticates nobody.
     /// </summary>
     /// <param name="policyName">The policy name, as registered with ASP.NET Core authorization.</param>
     public void RequireAuthorization(string policyName)

@@ -3,10 +3,7 @@ using Microsoft.Extensions.Configuration;
 namespace Cadence.Api.Internal;
 
 /// <summary>How many tokens each source supplied. Diagnostics only; values are never carried here.</summary>
-internal sealed record TokenSources(int FromCode, int FromConfiguration, int FromEnvironment)
-{
-    public int Total => FromCode + FromConfiguration + FromEnvironment;
-}
+internal sealed record TokenSources(int FromCode, int FromConfiguration, int FromEnvironment);
 
 /// <summary>Collects tokens from every source, and reports where they came from.</summary>
 /// <remarks>
@@ -24,6 +21,16 @@ internal static class TokenConfiguration
     /// <param name="options">The options to add to; tokens set in code are preserved.</param>
     public static void Bind(IConfiguration configuration, CadenceApiOptions options)
     {
+        // Tokens set in code pass through no validation on the way in, and an empty one satisfies
+        // the mapping gate while authenticating nobody: the exact failure the gate exists to stop.
+        for (var i = options.Tokens.Count - 1; i >= 0; i--)
+        {
+            if (string.IsNullOrWhiteSpace(options.Tokens[i]))
+            {
+                options.Tokens.RemoveAt(i);
+            }
+        }
+
         var fromCode = options.Tokens.Count;
 
         var fromConfiguration = 0;

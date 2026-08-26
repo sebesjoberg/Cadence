@@ -1,6 +1,7 @@
 using Cadence.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,12 +19,15 @@ internal sealed class ApiTestHost : IAsyncDisposable
 
     public HttpClient Client { get; private init; } = null!;
 
+    public IServiceProvider Services => _host.Services;
+
     public static async Task<ApiTestHost> StartAsync(
         Action<CadenceApiOptions>? configure = null,
         Action<IServiceCollection>? services = null,
         string? environment = null,
         LogCapture? logs = null,
-        IDictionary<string, string?>? configuration = null)
+        IDictionary<string, string?>? configuration = null,
+        Action<IEndpointRouteBuilder>? endpoints = null)
     {
         var builder = new HostBuilder().ConfigureWebHost(web =>
         {
@@ -55,7 +59,11 @@ internal sealed class ApiTestHost : IAsyncDisposable
                 app.UseRouting();
                 app.UseAuthentication();
                 app.UseAuthorization();
-                app.UseEndpoints(endpoints => endpoints.MapCadenceApi());
+                app.UseEndpoints(routes =>
+                {
+                    routes.MapCadenceApi();
+                    endpoints?.Invoke(routes);
+                });
             });
         });
 

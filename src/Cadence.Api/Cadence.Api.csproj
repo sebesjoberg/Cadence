@@ -15,4 +15,8 @@
     <ProjectReference Include="..\Cadence.Core\Cadence.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cadence.Api.Tests" />
+  </ItemGroup>
+
 </Project>

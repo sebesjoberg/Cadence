@@ -48,13 +48,15 @@ public static class CadenceApiEndpointExtensions
         }
 
         // Only when tokens exist: "0 tokens" on every start of an AllowUnauthenticated deployment is
-        // noise, not diagnostics.
-        var sources = options.TokenSources;
-
-        if (sources.Total > 0)
+        // noise, not diagnostics. Gated on the tokens rather than on the per-source counts, because
+        // a host that configures Tokens after AddApi is counted by no source and would otherwise
+        // boot with a real token unannounced.
+        if (options.Tokens.Count > 0)
         {
+            var sources = options.TokenSources;
+
             logger.TokenSourcesBound(
-                sources.Total,
+                options.Tokens.Count,
                 sources.FromCode,
                 sources.FromConfiguration,
                 sources.FromEnvironment);
