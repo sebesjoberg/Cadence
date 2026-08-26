@@ -2,6 +2,11 @@
 
 A readable companion to the full spec. The spec is the reference; this is the map.
 
+**What this file keeps.** Decisions and the reasons for them, measured behaviour that contradicted
+an assumption, and everything still ahead. What it does not keep: the story of arriving at a
+decision, or anything now readable from the code, the tests or the README. When a section's subject
+ships, it is cut down to whatever would otherwise have to be re-derived.
+
 ---
 
 ## 1. What it is, in one paragraph
@@ -54,19 +59,17 @@ infrastructure at all" a real mode instead of a degraded one.
 
 The lock key is `{jobName}:{scheduledForUtc}`.
 
-Why this is the whole design: a lock held *for the duration of a run* needs a TTL
-longer than the longest run — unknowable — so you are pushed into lease renewal,
-which fails under GC pause or partition, which means you need fencing tokens. That is
-a distributed-systems project, not a scheduler feature.
+Why, in one line: a lock held for the duration of a run needs a TTL longer than the longest run,
+which is unknowable, and that road ends in lease renewal, GC pauses and fencing tokens — a
+distributed-systems project, not a scheduler feature. The README makes the argument in full.
 
-Claiming the occurrence asks one question — *"has anyone already started this slot?"* —
-and once answered it never needs re-answering. The TTL only has to cover clock skew
-plus tick jitter, so a fixed 60s is correct no matter how long jobs run.
+Claiming the occurrence asks one question — *"has anyone already started this slot?"* — and once
+answered it never needs re-answering. The consequence worth keeping here: the TTL only has to cover
+clock skew plus tick jitter, so a fixed 60s is correct however long jobs run.
 
-**The guarantee is: at most one instance *starts* a given occurrence.** It is *not*
-"at most one instance is ever running this job". A slow run can overlap the next
-occurrence on a different instance. This is the thing users will misunderstand, so it
-belongs on the README's first screen, not in a footnote.
+**The guarantee is: at most one instance *starts* a given occurrence** — not "at most one instance
+is ever running this job". It is on the README's first screen, which is where this section asked for
+it.
 
 ### 3.2 In SQL, the claim *is* the run row
 
@@ -111,18 +114,12 @@ is not evidence of success.
 
 ---
 
-## 4. Layering — what costs what
+## 4. Layering, and what alerting adds to it
 
-| Call | Gets you | Needs |
-|---|---|---|
-| `AddCadence()` | cron in code, in-memory history, single instance, OTel | nothing |
-| `+ UseSqlStorage()` | persistence **and** clustering | a database |
-| `+ MapCadenceApi()` | trigger, reads, pause | a token, or an auth policy |
-| `+ MapCadenceDashboard()` | UI, schedule editing, manual trigger | a signed-in operator |
-| `+ AddAlerting()` | rules, watchdog, throttling | channel config |
-
-`UseSqlStorage()` alone is the documented "make it real" step — it brings the
-coordinator with it, so persistence and clustering arrive together.
+The table is in the README, which also carries the reason persistence and clustering are one step:
+splitting them would let you deploy two instances with shared history and no coordinator, running
+every occurrence twice while looking healthy in the logs. What is not there yet, because it is not
+built:
 
 **Alerting's key split:** channels (SMTP host, Twilio SID — secrets, infrastructure)
 are registered in code. Rules ("email ops@ when invoice-sync fails twice") are edited
@@ -159,39 +156,33 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 
 | | Milestone | Contents |
 |---|---|---|
-| **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain |
+| **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain — *done* |
 | **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*, with the Aspire host demonstrating it between real processes |
 | — | **decision point** | *resolved — see below* |
-| v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause — *pause has landed; the writable schedule source and change tokens landed early, in v0.2*. §13 is the design |
+| v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause. *Landed: pause, and `MapCadenceApi()`'s map-time gate; the writable schedule source and change tokens arrived early, in v0.2. Still §13's design: the endpoints, the `CadenceToken` handler, the health checks.* |
 | v0.3.1 | Identity | `ICredentialStore` on both tiers, its conformance suite, login and sessions, API-token creation and revocation — §13.5 |
 | v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
 
-### The decision point, resolved: keep the coordinator
+### The decision point, resolved
 
-The question was whether to build v0.3–v0.5 on Quartz.NET's clustering instead, should our
-own coordination layer overrun its budget. It did not. The whole cost:
+Whether to build v0.3–v0.5 on Quartz.NET's clustering instead, should our own coordination layer
+overrun its budget. It did not: one filtered unique index on a table run history needed anyway, a
+`TryClaimAsync` that is an `INSERT` and a check for 2601/2627, and a conformance suite both tiers
+are held to. Quartz would have traded that for a dependency, a second scheduling model to reconcile
+with this one, and misfire semantics we do not control.
 
-- one filtered unique index, `UX_CadenceJobRun_Occurrence`, on a table run history needed anyway
-- `SqlOccurrenceCoordinator`, whose `TryClaimAsync` is an `INSERT` and a check for 2601/2627
-- a conformance suite, which both tiers are held to rather than only the SQL one
-
-What it bought is in `ClusteredSchedulingTests`: two and five instances ticking against a real
-SQL Server with one run per occurrence, successive occurrences landing on different instances,
-and a schedule edited through one instance reaching the others.
-
-Quartz would trade that for a dependency, a second scheduling model to reconcile with this one,
-and misfire semantics we do not control. **Keep the coordinator.** `IOccurrenceCoordinator` stays
-the only seam that knows how a claim is won — no longer because we might swap it wholesale, but
-because a second tier has to slot in underneath it without Core noticing.
-
-It since has. The Redis tier needed no change to that interface, which was the test set for it
-here; what it did move was the janitor, and §11.2 records why.
+**Coordinator kept.** `IOccurrenceCoordinator` stays the only seam that knows how a claim is won —
+no longer because we might swap it wholesale, but because a second tier has to slot in underneath
+it without Core noticing. Redis then did, without changing it.
 
 ---
 
 ## 7. Recommended answers to the open questions
+
+Questions 5 (distributed pause) and 6 (one `MapCadence()` or two) are settled and owned elsewhere:
+§12 and §13.1.
 
 | # | Question | Recommendation |
 |---|---|---|
@@ -199,47 +190,32 @@ here; what it did move was the janitor, and §11.2 records why.
 | 2 | Per-job concurrency caps | **Defer.** Global `MaxConcurrentRuns` + `Skip` is enough for v1. |
 | 3 | Payload JSON Schema | **No.** Leave payloads opaque; the job validates. Saves a dependency and a UI surface. |
 | 4 | Retry within run vs. reschedule | **Cut `MaxAttempts` from v1.** In-run retry makes duration and timeout ambiguous in history. Later, do it as a new run with `Trigger = Retry` and `ScheduledForUtc = null`, which sidesteps claim uniqueness entirely. |
-| 5 | Distributed pause | **Yes, v1 — done, as two switches rather than one.** See §12. |
-| 6 | Merge Api + Dashboard | **Revised in v0.3: one options object, but two map calls.** The original answer was one `MapCadence()`. Building it found two audiences with two authentication mechanisms — a token for machines, a session for people — and one requirement that settles it: the callable API has to be switchable off. With one tree, "off" leaves every route mounted and answering to a session; with two it means not calling `MapCadenceApi()`, so the routes do not exist and a leaked token has nothing to reach. What survives of #6 is the part that mattered: one `CadenceApiOptions`, one gate, one thing to document and secure. See §13.1. |
 
 ---
 
-## 8. Gaps worth closing before v0.1
+## 8. Gaps still open
 
-1. **`Skip` cannot be strict across instances.** Checking run history for an in-flight
-   run is a read with a race window — two instances can both see "nothing running" and
-   both start. Either accept and document it as *local-strict, cluster-best-effort*, or
-   reintroduce a job-level lock and the lease problem with it. Take the first option and
-   say so plainly; this is the likeliest source of bug reports.
+Numbered as first written, so the references from §13 still resolve. Closed since: **#1** (`Skip`
+cannot be strict across instances — accepted and documented as local-strict, cluster-best-effort, in
+the README beside the guarantee), **#4** (IANA ids need ICU — `CronParser` detects it and names
+`InvariantGlobalization`), **#5** (`IWritableScheduleSource` split out) and **#6**
+(`JobContext.Report` batching — `BatchingLogAppender`, flushing on 100 entries or 250 ms, dropping
+rather than blocking, because back-pressure on `Report` would make a slow database into a slow job).
 
-2. **A 1s tick that re-evaluates every job does not scale with job count.** Since
-   sub-second scheduling is an explicit non-goal, keep an in-memory min-heap of next
-   occurrences, rebuilt only when the change token fires. The tick then peeks the head
-   instead of walking N schedules and their stores.
+**Gap 2. A 1s tick that re-evaluates every job does not scale with job count.** Since sub-second
+scheduling is an explicit non-goal, keep an in-memory min-heap of next occurrences, rebuilt only
+when the change token fires. The tick then peeks the head instead of walking N schedules and their
+stores.
 
-3. **Schedule store unavailable — boot versus tick.** Undefined today. Recommendation:
-   never fail boot on a store blip. Start from code defaults, report degraded health,
-   raise an alert. A database hiccup must not stop the whole application from starting.
-   *"Report degraded health" gets a mechanism in v0.3 — §13.4 — and one constraint that
-   was not obvious when this was written: the degraded signal must not reach the
-   orchestrator. Every replica shares one store, so a probe that fails on a store blip
-   fails on all of them at once.*
+**Gap 3. Schedule store unavailable — boot versus tick.** Undefined today. Recommendation: never
+fail boot on a store blip. Start from code defaults, report degraded health, raise an alert. A
+database hiccup must not stop the whole application from starting. *"Report degraded health" gets a
+mechanism in v0.3 — §13.4 — and one constraint that was not obvious when this was written: the
+degraded signal must not reach the orchestrator. Every replica shares one store, so a probe that
+fails on a store blip fails on all of them at once.*
 
-4. **IANA timezone ids need ICU.** `InvariantGlobalization=true` — common in slim
-   containers — breaks `FindSystemTimeZoneById` for IANA ids. Detect at boot and fail
-   with a message that names the property, rather than throwing per-tick later.
-
-5. **`IScheduleSource.IsWritable` + `UpsertAsync` on one interface** forces
-   non-writable sources to throw. Split out `IWritableScheduleSource`; the dashboard
-   already branches on the capability.
-
-6. **`JobContext.Report` writing straight through to SQL** lets a chatty job hammer the
-   database. Buffer and batch-flush. *Closed in v0.2: `BatchingLogAppender` inside
-   `SqlRunHistoryStore`, flushing on 100 entries or 250 ms. The buffer drops rather than
-   blocks — back-pressure on `Report` would make a slow database into a slow job.*
-
-7. **Alert state in memory means a crash-loop resets cooldowns and floods.** Warn at
-   boot if alerting is enabled without a persistent store.
+**Gap 7. Alert state in memory means a crash-loop resets cooldowns and floods.** Warn at
+boot if alerting is enabled without a persistent store.
 
 ---
 
@@ -262,25 +238,17 @@ one night a year and might build a catch-up around it. It doesn't — it runs la
 
 ### 9.2 The run id is assigned before the claim, not after it
 
-§3.2 says the claim *is* the run row. The v0.1 code could not do that: `TryClaimAsync` took
-only `(jobName, scheduledFor)` and `JobExecutor.DispatchAsync` generated its own
-`Guid.NewGuid()` afterwards, so the claim's insert and the history insert were two rows
-colliding on the same occurrence. `RecordSkippedAsync` had the identical problem — claim
-wins, overlap gate skips, and the skip record collides with the claim row.
+`TryClaimAsync` takes the run id from its caller. §3.2 requires that — a claim that generates its
+own id is two rows colliding on one occurrence — but the property that made it worth an interface
+change is that **the claim becomes idempotent.** A transient fault can drop the acknowledgement of
+an insert that already committed; a blind retry then gets 2627 back, reports "someone else won", and
+skips a run this instance owns, silently, which §3.2 identifies as the worst failure mode available.
+With a caller-assigned id the retry asks whether the existing row is its own and answers exactly.
+Without one, that question has no answer.
 
-v0.2 adds a `runId` parameter to `TryClaimAsync` and threads a pre-assigned id through
-`DispatchAsync` and `RecordSkippedAsync`. The seam stays one method returning `bool`.
-
-Beyond making §3.2 implementable, this buys a property that is otherwise unreachable: **the
-claim becomes idempotent.** A transient fault can drop the acknowledgement of an insert that
-already committed; a blind retry then gets 2627 back, reports "someone else won", and skips a
-run this instance owns — silently, which §3.2 identifies as the worst failure mode available.
-With a caller-assigned id the retry asks whether the existing row is its own and answers
-exactly. Without one, that question has no answer.
-
-The alternatives, for the record. A separate `CadenceOccurrenceClaim` table needs no Core
-change but reintroduces the claimed-but-unrecorded window and cannot be made retry-safe. A
-blind `UPDATE` from `StartAsync` leaves the claim ignorant of the run id and has the same
+Rejected, for the record: a separate `CadenceOccurrenceClaim` table, which needs no Core change but
+reintroduces the claimed-but-unrecorded window and cannot be made retry-safe; and a blind `UPDATE`
+from `StartAsync`, which leaves the claim ignorant of the run id and has the same
 retry hole.
 
 ### 9.3 A disabled job's occurrences are treated as never having existed
@@ -303,78 +271,37 @@ Measured in `samples/Cadence.Sample.AppHost`, three replicas against one SQL Ser
 | second | none |
 | third | none |
 
-Both runs, the same shape, and the winner changed between runs exactly as start order did. The cause
-is not subtle: every replica ticks on its own one-second timer, whose phase is fixed by when the
-process started, and the claim is a race to an `INSERT`. A replica whose tick fires 40 ms earlier
-wins every race there is, forever, until it stops.
+Both runs the same shape, and the winner changed between runs exactly as start order did: every
+replica ticks on its own one-second timer whose phase is fixed by when the process started, and the
+claim is a race to an `INSERT`, so a tick firing 40 ms earlier wins every race there is. Nothing is
+broken by that — §3.1's guarantee is *at most one*, and one is what runs. Killing the leader mid-run
+moved every subsequent claim to the next-earliest replica within one occurrence, and the janitor
+marked the interrupted run `Lost` 21 seconds later.
 
-Nothing here is broken — §3.1's guarantee is about *at most one*, and one is what runs. But "three
-replicas, so the work is spread three ways" is the obvious reading of a cluster, and it is wrong:
-the other replicas are failover capacity that happens to be warm. Failover itself is immediate;
-killing the leader mid-run moved every subsequent claim to the next-earliest replica within one
-occurrence, and the janitor marked the interrupted run `Lost` 21 seconds later.
+The README says this next to the guarantee, because someone sizing a cluster on the assumption that
+replicas share the load will size it wrong.
 
-This belongs in the README next to the guarantee, because someone sizing a cluster on the assumption
-that replicas share the load will size it wrong.
-
-**A fix exists and is deliberately not being taken yet.** Jittering each instance's tick phase by a
-random fraction of `TickInterval` would spread wins across replicas without touching the claim. It is
-a small change to the tick loop and a real change to a load-bearing path, so it wants its own
-decision rather than a ride on a sample's branch. Two things to weigh when it comes up: whether
-even distribution is a property worth *promising* once it has been observed, and whether jitter makes
-the tick's relationship to `ScheduledForUtc` harder to reason about than the current fixed phase.
-
-Designing v0.3's deployment story raised the stakes on the finding without settling the fix. Under
-an orchestrator this stops being a curiosity about sample output: a horizontal autoscaler pointed
-at CPU adds replicas that win nothing, so the cluster scales while the throughput does not, and the
-only thing that currently redistributes work is a rolling deploy reshuffling which pod started
-first — §14.3.
-
-It also turned up a better answer than jitter, which is why neither has been taken: if instances
-pull work from a queue instead of executing what they claimed, tick phase stops deciding who works
-and jitter buys nothing. That is §14.1, and §14.2 records why the cheaper fix is waiting on it.
+**Two fixes exist and neither has been taken.** Tick jitter (§14.2) spreads wins without touching
+the claim; pulling work from a queue instead of executing what was claimed (§14.1) makes tick phase
+stop deciding who works at all, which is why the cheaper fix waits on the better one. §14.3 records
+what the finding costs under an orchestrator, where an autoscaler adds replicas that win nothing.
 
 ---
 
 ## 10. The end-to-end samples
 
-`samples/Cadence.Sample.Worker` runs one job every ten seconds and consumes Cadence
-**as a package from a local feed**, not by project reference — which is why it caught
-`NU5039` (a declared `PackageReadmeFile` that was never packed) on its first run.
+`samples/Cadence.Sample.Worker` consumes Cadence **as a package from a local feed**, not by project
+reference, which is the point of it: that is how it caught `NU5039`, a declared `PackageReadmeFile`
+that was never packed. It also proves the telemetry fan-out end to end — MEL console output, OTel
+log records carrying `JobName`/`RunId`/`InstanceId` as scope attributes, a `cadence.job` span with
+its tags and a `cadence.job.progress` event, and `seconds_since_success`.
 
-It proves the telemetry fan-out end to end: MEL console output, OTel log records
-carrying `JobName`/`RunId`/`InstanceId` as scope attributes, a `cadence.job` span with
-the spec's §14 tags and a `cadence.job.progress` event, and the metrics including
-`seconds_since_success`.
-
-### The Aspire version: built, and v0.3 clears the last blocker
-
-`samples/Cadence.Sample.AppHost` now runs three replicas against one SQL Server. What it
-measured is §9.4. It was blocked on two things:
-
-| Blocker | Milestone | Status |
-|---|---|---|
-| `Cadence.Storage.Sql` | v0.2 | **Cleared.** Without the unique-index claim, two replicas both run every occurrence, so the sample would have demonstrated the bug rather than the guarantee |
-| `Cadence.Dashboard` | v0.4 | **Cleared early, by v0.3.** The blocker was never the UI, it was that the history sink had no reader, so the sample fell back to Aspire's own dashboard — which shows OTel, not `CadenceJobRun`. `GET /cadence/api/runs` is a reader, and it arrives a milestone before the dashboard does |
-
-**The first of the two consequences recorded here was wrong, and the correction matters.**
-It read: *"The Aspire host is where clustering gets proven — N replicas, one run per
-occurrence, cannot be tested in-process against `NoOpCoordinator`."* The premise is right
-and the conclusion does not follow. `NoOpCoordinator` is not the only alternative: five
-instances can share one `SqlOccurrenceCoordinator` against a real SQL Server inside one
-test process, which is exactly what `ClusteredSchedulingTests` does. Clustering was proven
-there, in seconds, on every CI run — where an Aspire host proves it once, by hand, for
-whoever is watching the logs at the time.
-
-So the Aspire host is a **demonstration**, not the proof, and it was built for what only it can
-show:
-
-1. **Real process boundaries.** Separate processes, separate `InstanceId`s, a real network
-   between them and the database, and a replica that can be killed mid-run to watch the
-   janitor reap it. The in-process test deliberately fakes all of that away.
-2. **Two replicas will expose the `Skip` caveat immediately.** A long-running job on
-   replica A, next occurrence claimed by replica B, `Skip` configured, and the job runs
-   anyway. Better to see that in a sample we control than in someone's incident.
+`samples/Cadence.Sample.AppHost` runs three replicas against one SQL Server; what it measured is
+§9.4. **It is a demonstration, not the proof** — clustering is proven by `ClusteredSchedulingTests`,
+five instances sharing one `SqlOccurrenceCoordinator` against a real SQL Server inside one test
+process, in seconds, on every CI run. What only the Aspire host can show is real process boundaries,
+a replica killed mid-run for the janitor to reap, and the `Skip` caveat happening in front of
+someone — better in a sample we control than in someone's incident.
 
 ---
 
@@ -386,66 +313,41 @@ same services, so calling both leaves whichever ran last winning on some and not
 
 ### 11.1 The claim is still the run
 
-The obvious Redis coordinator is `SET key NX EX 60`, and it is wrong for this. A claim that
-expires is a claim that can be won twice — not inside the tick's horizon, but by anything
-replaying an older occurrence, which is exactly what catch-up after downtime does. §3.2 gets
-its property in SQL from the claim being a permanent row; a tier whose claims quietly stop
-existing after a minute is not an alternative to that, it is a different guarantee wearing
-the same interface.
-
-So the Redis claim is permanent too, written by the same Lua script as the run's hash and
-its index entries, and removed by the janitor with the run it belongs to. Retention therefore
-bounds how far back double-execution is prevented — thirty days by default — and both tiers
-behave identically, because in both the claim *is* the run.
+The obvious Redis coordinator is `SET key NX EX 60`, and it is wrong for this. A claim that expires
+is a claim that can be won twice — not inside the tick's horizon, but by anything replaying an older
+occurrence, which is exactly what catch-up after downtime does. §3.2 gets its property in SQL from
+the claim being a permanent row; a tier whose claims quietly stop existing after a minute is not an
+alternative to that, it is a different guarantee wearing the same interface. So the Redis claim is
+permanent too, written by the same Lua script as the run's hash and its index entries, and removed
+by the janitor with the run it belongs to.
 
 ### 11.2 The seam held, and one thing had to move
 
-`IOccurrenceCoordinator` needed no change, which was the test §6 set for it.
-
-The janitor did. It lived in `Cadence.Storage.Sql`, calling that store's internal maintenance
-methods, and Redis needed the same four passes over a completely different set of operations.
-Rather than a second copy of the policy — reap before purge, batch, never escalate a failure
-into a scheduling problem — the policy moved to `Cadence.Core` behind `IStorageMaintenance`,
-and each tier now supplies only the operations. That is the shape §6 asked for and the
-coordinator alone would not have revealed: the seam that mattered second was the one nobody
-had named.
+`IOccurrenceCoordinator` needed no change, which was the test §6 set for it. The janitor did: it
+lived in `Cadence.Storage.Sql`, calling that store's internal maintenance methods, and Redis needed
+the same four passes over completely different operations. Rather than a second copy of the policy —
+reap before purge, batch, never escalate a failure into a scheduling problem — the policy moved to
+`Cadence.Core` behind `IStorageMaintenance`, and each tier now supplies only the operations. The
+part worth keeping: the seam that mattered second was the one nobody had named.
 
 ### 11.3 Where the tiers genuinely differ
 
-Not in behaviour — the conformance suites are the point — but in operations:
+Not in behaviour — the conformance suites are the point — but in operations, and the README's table
+is the statement of that, durability verdict included.
 
-| | SQL Server | Redis |
-|---|---|---|
-| Durability | a committed run is committed | whatever the Redis is configured for |
-| Schema | migrator, application lock, reviewable scripts | none; keys appear when written |
-| Query surface | any filter, indexed | fast by job, instance and time; status alone walks the index |
-| Schedule changes | polled | pushed, with the poll kept as a backstop |
-
-**Durability is the deciding one, and the README says so plainly rather than selling the
-tier.** With Redis's defaults a restart can lose recent writes, claims included, which is
-the one failure the coordinator exists to prevent. Anyone choosing Redis is trading a bounded
-window of double-execution risk for not running a database, and should be told that in those
-words before they choose.
-
-The pushed schedule change is the one place Redis is straightforwardly better: an edit
-reaches other instances in milliseconds instead of within a poll interval. The poll stays
-anyway — Redis pub/sub is fire-and-forget with no redelivery, and a scheduler that silently
-stopped noticing schedule edits would look perfectly healthy while ignoring the dashboard.
+One entry in it needs its reason recorded, because it looks like an omission: the schedule poll stays
+enabled on Redis even though pub/sub delivers an edit in milliseconds. Redis pub/sub is
+fire-and-forget with no redelivery, and a scheduler that had silently stopped noticing schedule edits
+would look perfectly healthy while ignoring the dashboard.
 
 ---
 
 ## 12. Pause, and why it is two switches
 
-§7 answered "distributed pause?" with *yes, one row*. Building it turned one row into two switches,
-because the incident it exists for wants them apart: stop the automatic work, keep the ability to
-run one job by hand. A single switch forces a choice between an operator with no brake and an
-operator with no escape hatch. `PauseScope` is therefore a flags enum — `Schedule`, `Triggers`,
-both, neither — and the one row holds it along with who set it and why.
-
-**A paused occurrence is treated as never having existed**, which is §9.3's rule reused rather than
-a second policy: the ticker takes the same branch as a disabled job, so the evaluation point
-advances and resuming starts from the next occurrence. Anyone who pauses for an hour and expects
-the hour back on resume is expecting the thing §9.3 explains nobody means.
+Pause is **two switches, not one** — `PauseScope` is a flags enum, and paused occurrences are
+treated as never having existed, which is §9.3's rule reused rather than a second policy. The README
+states both, and why an operator wants a brake and an escape hatch separately. Three things it does
+not state:
 
 **The write rides the schedule version.** `SqlPauseStore` bumps `CadenceScheduleVersion` in the
 transaction that writes the switches, and `RedisPauseStore` INCRs the counter and publishes on the
@@ -474,14 +376,12 @@ Core stays on the `Extensions.*` abstractions.
 
 `MapCadenceApi()` mounts the machine-callable tree and authenticates it with a token.
 `MapCadenceDashboard()` mounts the UI and the endpoints it needs, and authenticates those with an
-operator session. §7 #6 asked for a single `MapCadence()`; two audiences with two authentication
-mechanisms did not survive it, and one requirement decided it — the callable API has to be
-switchable off. On one tree "off" is a flag that leaves every route mounted and answering to a
-session. On two it is the absence of a line of code, so the routes do not exist and a leaked token
-has nothing to reach.
-
-What §7 #6 was actually protecting still holds: one `CadenceApiOptions`, one gate, one thing to
-secure. The dashboard adds fields to that object in v0.4 rather than introducing a second one.
+operator session. Two trees rather than one because the callable API has to be switchable off: on
+one tree "off" is a flag that leaves every route mounted and answering to a session, while on two it
+is the absence of a line of code, so the routes do not exist and a leaked token has nothing to
+reach. What the single tree was protecting still holds — one `CadenceApiOptions`, one gate, one
+thing to secure — and the dashboard adds fields to that object in v0.4 rather than introducing a
+second one.
 
 Registration follows the storage tiers, because `CadenceBuilder.Services` was made public for
 exactly this:
@@ -507,7 +407,8 @@ GET  /cadence/api/pause                  200  { scope, reason, setBy, setAtUtc }
 PUT  /cadence/api/pause                  204
 ```
 
-§4 originally promised "trigger / status / schedule endpoints". **Schedule writes are not here.**
+The layering table promised "trigger / status / schedule endpoints" for this package.
+**Schedule writes are not here.**
 The two writes are not equivalent: a triggered run is loud, appears in history, and is over. A
 changed cron expression is silent and permanent, and nobody notices it until the night it does not
 run. So a token can start work and stop work, and only a person can change when work happens.
@@ -551,6 +452,8 @@ Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
 | `options.AllowUnauthenticated = true` | maps, warning logged **every start** |
 | none of those, `IsDevelopment()` | maps, loud warning |
 | none of those, anything else | **throws**, naming all three remedies |
+
+*That table is the part that has landed. Everything else in §13.3 is still design.*
 
 The composition rule is one sentence: **a named policy governs alone, and the token scheme
 authenticates into it.** Token auth produces a principal carrying a `cadence:token` claim and the
@@ -742,9 +645,18 @@ replica count is failover capacity, and the README says so next to the guarantee
 `MaxDuration` therefore gets SIGTERM, thirty seconds, and SIGKILL — the run dies mid-flight and the
 janitor marks it `Lost` a heartbeat timeout later, which reads in history as an infrastructure
 failure rather than the misconfiguration it is. The invariant is `terminationGracePeriodSeconds ≥
-ShutdownTimeout ≥ ShutdownDrainTimeout ≥ the longest MaxDuration`, and nothing checks it. Two of
-the three are outside the process, so only the inner pair can be validated; that much is a boot
-probe in the §5 spirit, and the outer one is deployment documentation.
+ShutdownTimeout ≥ ShutdownDrainTimeout ≥ the longest MaxDuration`.
+
+**The inner pair is now checked, and only warns.** `ShutdownBudgetProbe` runs on the boot path
+beside the graph validator and logs one warning per violation. It does not throw, which is a
+departure from §5's fail-closed default and deliberate: every timeout in the chain defaults to
+thirty seconds while `MaxDuration` does not, so the common violation is one that existing
+applications are already running with, and failing their boot would turn an upgrade into an outage.
+Nor could throwing ever be justified on the evidence — `terminationGracePeriodSeconds` is outside
+the process, so a clean inner pair proves nothing about whether the run survives. The remaining
+gap is that the bound comes from the *registered* maximum durations, which is what is knowable
+before the first schedule read; a writable schedule source can raise one later and that edit is
+unchecked. Validating the outermost value stays deployment documentation.
 
 ### 14.4 The compose proof
 
