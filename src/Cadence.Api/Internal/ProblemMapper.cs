@@ -51,6 +51,21 @@ internal static class ProblemMapper
         "Unknown pause scope",
         $"'{scope}' is not a pause scope. Use None, Schedule, Triggers or All.");
 
+    /// <summary>
+    /// Describes a caller refused because the surface is mounted on the Development branch of the
+    /// gate, which authenticates nobody. The remedy is in the detail: whoever meets this is more
+    /// likely to be scanning a misconfigured container than holding the deployment's own runbook.
+    /// </summary>
+    public static ProblemDetails NotLoopback() => Problem(
+        403,
+        "not-loopback",
+        "Loopback callers only",
+        "Cadence's API is mapped with nothing that would authenticate it, which is allowed in " +
+        "Development only, so it answers loopback callers alone. Configure a token " +
+        "(CADENCE_API_TOKEN, or Cadence:Api:Tokens), name an authorization policy with " +
+        "CadenceApiOptions.RequireAuthorization, or — if something in front of this application " +
+        "already authenticates callers — set CadenceApiOptions.AllowUnauthenticated.");
+
     /// <summary>Describes a run that no longer exists, or never did.</summary>
     /// <param name="runId">The id that matched nothing.</param>
     public static ProblemDetails RunNotFound(Guid runId) => Problem(

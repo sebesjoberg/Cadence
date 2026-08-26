@@ -1,3 +1,4 @@
+using System.Net;
 using Cadence.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -27,7 +28,8 @@ internal sealed class ApiTestHost : IAsyncDisposable
         string? environment = null,
         LogCapture? logs = null,
         IDictionary<string, string?>? configuration = null,
-        Action<IEndpointRouteBuilder>? endpoints = null)
+        Action<IEndpointRouteBuilder>? endpoints = null,
+        IPAddress? remoteIp = null)
     {
         var builder = new HostBuilder().ConfigureWebHost(web =>
         {
@@ -56,6 +58,17 @@ internal sealed class ApiTestHost : IAsyncDisposable
 
             web.Configure(app =>
             {
+                // TestServer leaves RemoteIpAddress null, so a test about the caller's address sets
+                // one here -- before routing, which is where a real transport would have filled it in.
+                if (remoteIp is not null)
+                {
+                    app.Use((context, next) =>
+                    {
+                        context.Connection.RemoteIpAddress = remoteIp;
+                        return next(context);
+                    });
+                }
+
                 app.UseRouting();
                 app.UseAuthentication();
                 app.UseAuthorization();

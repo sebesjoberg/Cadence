@@ -1,5 +1,6 @@
 using Cadence.Api.Internal;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,8 +23,11 @@ public static class CadenceApiEndpointExtensions
     /// deliberately not on this tree; see §13.2.
     /// </summary>
     /// <param name="endpoints">The route builder.</param>
-    /// <returns>A group containing the mapped endpoints.</returns>
-    public static IEndpointRouteBuilder MapCadenceApi(this IEndpointRouteBuilder endpoints)
+    /// <returns>
+    /// The group the endpoints were mapped into, so a host can attach conventions of its own — rate
+    /// limiting, CORS, OpenAPI metadata — to the tree it has just mounted.
+    /// </returns>
+    public static RouteGroupBuilder MapCadenceApi(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
@@ -33,6 +37,7 @@ public static class CadenceApiEndpointExtensions
 
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Cadence.Api");
         var authenticated = options.PolicyName is not null || options.Tokens.Count > 0;
+        var loopbackOnly = false;
 
         // Nested on !authenticated so that AllowUnauthenticated set alongside a token or a policy
         // says nothing: the policy below is still applied, and warning that no authentication is
@@ -50,7 +55,8 @@ public static class CadenceApiEndpointExtensions
             }
             else
             {
-                logger.MappedUnauthenticatedInDevelopment();
+                logger.MappedUnauthenticatedInDevelopment(options.BasePath);
+                loopbackOnly = true;
             }
         }
 
@@ -83,6 +89,13 @@ public static class CadenceApiEndpointExtensions
         else if (options.Tokens.Count > 0)
         {
             group.RequireAuthorization(CadenceTokenDefaults.Policy);
+        }
+        else if (loopbackOnly)
+        {
+            // Nothing authenticates this tree, so the network is the only boundary left. Not applied
+            // to AllowUnauthenticated, where a proxy or mesh in front makes every caller legitimately
+            // non-loopback -- that flag is an operator's decision and carries its own warning.
+            group.AddEndpointFilter<LoopbackOnlyFilter>();
         }
 
         // Every handler with a body returns JsonHttpResult<T>, so the responses go out through the
