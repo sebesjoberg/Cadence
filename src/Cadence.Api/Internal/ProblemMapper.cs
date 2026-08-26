@@ -1,4 +1,6 @@
 using Cadence.Execution;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cadence.Api.Internal;
@@ -32,6 +34,27 @@ internal static class ProblemMapper
         "run-skipped",
         "No run was started",
         $"'{jobName}' was not started: {result.SkipReason}");
+
+    /// <summary>Describes a run that no longer exists, or never did.</summary>
+    /// <param name="runId">The id that matched nothing.</param>
+    public static ProblemDetails RunNotFound(Guid runId) => Problem(
+        404,
+        "run-not-found",
+        "Run not found",
+        $"No run is recorded under the id '{runId}'.");
+
+    /// <summary>
+    /// Renders a problem as a response. Serialized through the control surface's own JSON context,
+    /// so the wire shape is the library's and not whatever the host has configured globally.
+    /// </summary>
+    /// <param name="problem">The problem to return.</param>
+    public static JsonHttpResult<ProblemDetails> AsResult(ProblemDetails problem) => TypedResults.Json(
+        problem,
+        CadenceApiJsonContext.Default.ProblemDetails,
+        contentType: "application/problem+json",
+
+        // A refusal with no status is a bug here rather than a success; 200 would bury it.
+        statusCode: problem.Status ?? StatusCodes.Status500InternalServerError);
 
     private static ProblemDetails Problem(int status, string slug, string title, string detail) => new()
     {

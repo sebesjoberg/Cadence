@@ -1,4 +1,5 @@
 using Cadence.Api.Internal;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -62,6 +63,25 @@ public static class CadenceApiEndpointExtensions
                 sources.FromEnvironment);
         }
 
-        return endpoints;
+        var group = endpoints.MapGroup($"{options.BasePath.TrimEnd('/')}/api");
+
+        // A host policy governs alone when it names one. Otherwise the built-in policy is applied
+        // only when a token exists, because AddApi registers that policy on the same condition —
+        // applying it without one would authenticate against a scheme that is not there, which is a
+        // 500 on every request in exactly the deployments that expect none. AllowUnauthenticated
+        // and the Development case apply no policy at all: that is what those flags mean.
+        if (options.PolicyName is { } policyName)
+        {
+            group.RequireAuthorization(policyName);
+        }
+        else if (options.Tokens.Count > 0)
+        {
+            group.RequireAuthorization(CadenceTokenDefaults.Policy);
+        }
+
+        JobEndpoints.Map(group);
+        RunEndpoints.Map(group);
+
+        return group;
     }
 }
