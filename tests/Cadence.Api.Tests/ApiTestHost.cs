@@ -58,8 +58,7 @@ internal sealed class ApiTestHost : IAsyncDisposable
 
             web.Configure(app =>
             {
-                // TestServer leaves RemoteIpAddress null, so a test about the caller's address sets
-                // one here -- before routing, which is where a real transport would have filled it in.
+                // TestServer leaves RemoteIpAddress null; a real transport would have set it here.
                 if (remoteIp is not null)
                 {
                     app.Use((context, next) =>

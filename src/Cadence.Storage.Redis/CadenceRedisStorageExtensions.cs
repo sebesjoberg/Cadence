@@ -62,10 +62,8 @@ public static class CadenceRedisStorageExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton(sp => new RedisConnection(sp.GetRequiredService<RedisStorageOptions>()));
 
-        // Guarded because AddCheck appends unconditionally and the health check service rejects
-        // duplicate names: without this, a second UseRedisStorage call -- which every other
-        // registration here already tolerates -- would throw on the first resolve of
-        // HealthCheckService. The check's own singleton is the marker.
+        // Guarded because AddCheck appends unconditionally and duplicate names throw, so a second
+        // UseRedisStorage call would break HealthCheckService.
         if (!services.Any(service => service.ServiceType == typeof(RedisStorageHealthCheck)))
         {
             services.AddSingleton<RedisStorageHealthCheck>();

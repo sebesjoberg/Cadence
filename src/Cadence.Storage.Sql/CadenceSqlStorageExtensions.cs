@@ -56,10 +56,8 @@ public static class CadenceSqlStorageExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton(sp => new SqlDatabase(sp.GetRequiredService<SqlStorageOptions>()));
 
-        // Guarded because AddCheck appends unconditionally and the health check service rejects
-        // duplicate names: without this, a second UseSqlStorage call -- which every other
-        // registration here already tolerates -- would throw on the first resolve of
-        // HealthCheckService. The check's own singleton is the marker.
+        // Guarded because AddCheck appends unconditionally and duplicate names throw, so a second
+        // UseSqlStorage call would break HealthCheckService.
         if (!services.Any(service => service.ServiceType == typeof(SqlStorageHealthCheck)))
         {
             services.AddSingleton<SqlStorageHealthCheck>();
@@ -77,9 +75,8 @@ public static class CadenceSqlStorageExtensions
                 sp.GetRequiredService<IOptions<CadenceOptions>>(),
                 sp.GetRequiredService<ILogger<SqlOccurrenceCoordinator>>())));
 
-        // Registered as the concrete type as well, because the janitor needs the maintenance
-        // operations that are not on IRunHistoryStore -- per-job trimming and reaping. Both
-        // registrations resolve the same singleton, so there is one log-flush buffer, not two.
+        // Registered as the concrete type too: the janitor needs trimming and reaping, which are not
+        // on IRunHistoryStore. Both registrations resolve the same singleton, so one flush buffer.
         services.TryAddSingleton(sp => new SqlRunHistoryStore(
             sp.GetRequiredService<SqlDatabase>(),
             sp.GetRequiredService<SqlStorageOptions>(),

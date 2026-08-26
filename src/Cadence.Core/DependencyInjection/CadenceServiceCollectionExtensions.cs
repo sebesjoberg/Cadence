@@ -15,10 +15,8 @@ namespace Cadence;
 /// <summary>Registers Cadence with the host's service collection.</summary>
 public static class CadenceServiceCollectionExtensions
 {
-    // Namespaced, like cadence.storage, because MapCadenceHealth selects purely by tag. A host
-    // following the ASP.NET Core documentation's own convention -- tags: ["ready"] on its own
-    // database check -- would otherwise put that store on Cadence's readiness probe, which is the
-    // cluster-wide 503 on a storage blip that §13.4 exists to make structurally impossible.
+    // Namespaced because MapCadenceHealth selects purely by tag: a host's own database check tagged
+    // "ready" would otherwise land on Cadence's readiness probe.
     private const string LiveTag = "cadence.live";
     private const string ReadyTag = "cadence.ready";
 
@@ -69,14 +67,9 @@ public static class CadenceServiceCollectionExtensions
 
         var descriptors = builder.Jobs.ToList();
 
-        // Neither check is given a store, so neither can fail on one. §13.4: every replica shares
-        // one store, so a store-honest readiness probe empties the service on every pod at once. The
-        // job count is passed by value for the same reason - the registry is in-process today, but a
-        // probe that holds it would inherit whatever the registry becomes.
-        //
-        // Guarded because AddCheck appends unconditionally and the health check service rejects
-        // duplicate names: without this, calling AddCadence twice - which has always worked - would
-        // throw on the first resolve of HealthCheckService.
+        // Neither check is given a store: replicas share one, so a store-honest readiness probe
+        // would empty the service on every pod at once. Guarded because AddCheck appends
+        // unconditionally and duplicate names throw, so a second AddCadence call would break.
         if (!services.Any(service => service.ImplementationType == typeof(CadenceHostedService)))
         {
             services.AddHealthChecks()
