@@ -51,7 +51,6 @@ public sealed class RedisStorageHealthCheckTests
         var result = await check.CheckHealthAsync(new HealthCheckContext(), default);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
-        Assert.NotEqual(HealthStatus.Unhealthy, result.Status);
 
         // The exception type, not merely that there was one: an argument exception thrown before the
         // socket was touched would satisfy NotNull identically, and the only test that proves the
@@ -77,7 +76,8 @@ public sealed class RedisStorageHealthCheckTests
         // this whole section exists to prevent.
         Assert.DoesNotContain(
             registrations,
-            r => r.Name == "cadence-redis" && (r.Tags.Contains("live") || r.Tags.Contains("ready")));
+            r => r.Name == "cadence-redis"
+                && (r.Tags.Contains("cadence.live") || r.Tags.Contains("cadence.ready")));
     }
 
     [Fact]

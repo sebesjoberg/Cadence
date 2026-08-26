@@ -10,6 +10,12 @@ namespace Cadence.Api;
 /// </summary>
 public static class CadenceHealthEndpointExtensions
 {
+    // Written by Cadence.Core's AddCadence and read here. Namespaced so a host check tagged
+    // "live" or "ready" -- the ASP.NET Core documentation's own convention -- joins neither
+    // probe, and cannot turn a storage blip into a 503 on every replica at once.
+    private const string LiveTag = "cadence.live";
+    private const string ReadyTag = "cadence.ready";
+
     /// <summary>
     /// Maps liveness and readiness, both anonymous.
     /// </summary>
@@ -25,9 +31,10 @@ public static class CadenceHealthEndpointExtensions
     /// humans, alerting and the dashboard — never for the kubelet.
     /// </para>
     /// <para>
-    /// Each path selects by tag, so composing these by hand is a two-line job: <c>live</c> selects
-    /// <c>cadence-live</c>, <c>ready</c> selects <c>cadence-ready</c>, and neither selects the
-    /// <c>cadence.storage</c> checks a storage package registers.
+    /// Each path selects by tag, so composing these by hand is a two-line job: the liveness path
+    /// selects <c>cadence.live</c>, the readiness path selects <c>cadence.ready</c>, and neither
+    /// selects the <c>cadence.storage</c> checks a storage package registers. All three are
+    /// namespaced, so a host check tagged <c>live</c> or <c>ready</c> joins neither probe.
     /// </para>
     /// </remarks>
     public static IEndpointRouteBuilder MapCadenceHealth(
@@ -51,12 +58,12 @@ public static class CadenceHealthEndpointExtensions
 
         endpoints.MapHealthChecks(livePath, new HealthCheckOptions
         {
-            Predicate = registration => registration.Tags.Contains("live"),
+            Predicate = registration => registration.Tags.Contains(LiveTag),
         }).AllowAnonymous();
 
         endpoints.MapHealthChecks(readyPath, new HealthCheckOptions
         {
-            Predicate = registration => registration.Tags.Contains("ready"),
+            Predicate = registration => registration.Tags.Contains(ReadyTag),
         }).AllowAnonymous();
 
         return endpoints;

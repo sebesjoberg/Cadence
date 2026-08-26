@@ -15,6 +15,13 @@ namespace Cadence;
 /// <summary>Registers Cadence with the host's service collection.</summary>
 public static class CadenceServiceCollectionExtensions
 {
+    // Namespaced, like cadence.storage, because MapCadenceHealth selects purely by tag. A host
+    // following the ASP.NET Core documentation's own convention -- tags: ["ready"] on its own
+    // database check -- would otherwise put that store on Cadence's readiness probe, which is the
+    // cluster-wide 503 on a storage blip that §13.4 exists to make structurally impossible.
+    private const string LiveTag = "cadence.live";
+    private const string ReadyTag = "cadence.ready";
+
     /// <summary>
     /// Adds the scheduler. With no further configuration this gives code-defined schedules,
     /// in-memory run history, single-instance coordination and OpenTelemetry output — no external
@@ -73,9 +80,9 @@ public static class CadenceServiceCollectionExtensions
         if (!services.Any(service => service.ImplementationType == typeof(CadenceHostedService)))
         {
             services.AddHealthChecks()
-                .AddCheck<LivenessHealthCheck>("cadence-live", tags: ["live"])
+                .AddCheck<LivenessHealthCheck>("cadence-live", tags: [LiveTag])
                 .AddTypeActivatedCheck<ReadinessHealthCheck>(
-                    "cadence-ready", failureStatus: null, tags: ["ready"], args: descriptors.Count);
+                    "cadence-ready", failureStatus: null, tags: [ReadyTag], args: descriptors.Count);
         }
 
         services.AddSingleton<IJobRegistry>(_ => new JobRegistry(descriptors));

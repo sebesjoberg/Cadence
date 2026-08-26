@@ -110,11 +110,13 @@ public sealed class HealthCheckTests
 
         var checks = host.Services.GetRequiredService<HealthCheckService>();
 
-        var live = await checks.CheckHealthAsync(r => r.Tags.Contains("live"), default);
-        var readyBefore = await checks.CheckHealthAsync(r => r.Tags.Contains("ready"), default);
+        var live = await checks.CheckHealthAsync(r => r.Tags.Contains("cadence.live"), default);
+        var readyBefore =
+            await checks.CheckHealthAsync(r => r.Tags.Contains("cadence.ready"), default);
 
         await host.StartAsync();
-        var readyAfter = await checks.CheckHealthAsync(r => r.Tags.Contains("ready"), default);
+        var readyAfter =
+            await checks.CheckHealthAsync(r => r.Tags.Contains("cadence.ready"), default);
         await host.StopAsync();
 
         Assert.Equal(HealthStatus.Healthy, live.Status);
@@ -157,7 +159,9 @@ public sealed class HealthCheckTests
         var registrations = services.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
             .Value.Registrations;
 
-        Assert.Contains(registrations, r => r.Name == "cadence-live" && r.Tags.Contains("live"));
-        Assert.Contains(registrations, r => r.Name == "cadence-ready" && r.Tags.Contains("ready"));
+        Assert.Contains(
+            registrations, r => r.Name == "cadence-live" && r.Tags.Contains("cadence.live"));
+        Assert.Contains(
+            registrations, r => r.Name == "cadence-ready" && r.Tags.Contains("cadence.ready"));
     }
 }

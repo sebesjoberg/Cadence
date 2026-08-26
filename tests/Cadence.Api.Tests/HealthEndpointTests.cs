@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cadence.Api.Tests;
@@ -25,7 +26,6 @@ public sealed class HealthEndpointTests
 
         var response = await host.Client.GetAsync(path);
 
-        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
@@ -135,6 +135,43 @@ public sealed class HealthEndpointTests
         Assert.DoesNotContain(body.Checks, check => check.Name is "cadence-live" or "cadence-ready");
     }
 
+    [Theory]
+    [InlineData("/health/live", "cadence.live", "cadence-live")]
+    [InlineData("/health/ready", "cadence.ready", "cadence-ready")]
+    public async Task EachProbeRouteSelectsTheTagCoreRegistered(string path, string tag, string check)
+    {
+        // Cadence.Core writes these tags and Cadence.Api's predicates read them, from two private
+        // constants in two packages that no compiler links -- and MapCadenceHealth's whole guarantee
+        // rests on the two agreeing. One literal here stands for both ends: a failing check under it
+        // proves Api's predicate selects that tag, and Core's registration is read back off the
+        // running host to prove Core writes it. Renaming either side alone turns one of the two red.
+        await using var host = await StartAsync(services => services.AddHealthChecks()
+            .AddCheck<AlwaysDown>("drift-sentinel", tags: [tag]));
+
+        var response = await host.Client.GetAsync(path);
+        var registrations = host.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
+            .Value.Registrations;
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains(registrations, r => r.Name == check && r.Tags.Contains(tag));
+    }
+
+    [Fact]
+    public async Task AHostCheckOnTheBareTagsJoinsNeitherProbe()
+    {
+        // The composition the ASP.NET Core documentation encourages: a host's own database check
+        // tagged "ready". Namespacing the probe tags is what keeps it off them, so a store blip
+        // cannot answer 503 on every replica at once.
+        await using var host = await StartAsync(services => services.AddHealthChecks()
+            .AddCheck<AlwaysDown>("host-database", tags: ["live", "ready"]));
+
+        var live = await host.Client.GetAsync("/health/live");
+        var ready = await host.Client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+    }
+
     [Fact]
     public async Task TheProbePathsAreConfigurable()
     {
@@ -161,6 +198,15 @@ public sealed class HealthEndpointTests
         Action<IServiceCollection>? services = null,
         Action<Microsoft.AspNetCore.Routing.IEndpointRouteBuilder>? endpoints = null) =>
         ApiTestHost.StartAsync(api => api.Tokens.Add(Token), services, endpoints: endpoints);
+
+    /// <summary>Fails hard, so a route that adopted it answers 503 rather than 200.</summary>
+    private sealed class AlwaysDown : IHealthCheck
+    {
+        public Task<HealthCheckResult> CheckHealthAsync(
+            HealthCheckContext context,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(HealthCheckResult.Unhealthy("Down."));
+    }
 
     /// <summary>Stands in for a storage tier that is down, so the split can be tested without one.</summary>
     private sealed class UnreachableStore : IHealthCheck
