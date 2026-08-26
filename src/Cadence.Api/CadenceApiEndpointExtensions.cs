@@ -47,6 +47,19 @@ public static class CadenceApiEndpointExtensions
             logger.MappedUnauthenticatedInDevelopment();
         }
 
+        // Only when tokens exist: "0 tokens" on every start of an AllowUnauthenticated deployment is
+        // noise, not diagnostics.
+        var sources = options.TokenSources;
+
+        if (sources.Total > 0)
+        {
+            logger.TokenSourcesBound(
+                sources.Total,
+                sources.FromCode,
+                sources.FromConfiguration,
+                sources.FromEnvironment);
+        }
+
         return endpoints;
     }
 }

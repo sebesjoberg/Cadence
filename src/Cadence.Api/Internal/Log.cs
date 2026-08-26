@@ -27,4 +27,17 @@ internal static partial class Log
                   "This is only safe when something in front of this application authenticates " +
                   "callers.")]
     public static partial void MappedWithAuthenticationDisabled(this ILogger logger, string basePath);
+
+    [LoggerMessage(
+        EventId = 3002,
+        Level = LogLevel.Information,
+        Message = "Cadence's API accepted {TotalCount} token(s): {FromCode} set in code, " +
+                  "{FromConfiguration} from Cadence:Api:Tokens, {FromEnvironment} from " +
+                  "CADENCE_API_TOKEN. Values are never logged.")]
+    public static partial void TokenSourcesBound(
+        this ILogger logger,
+        int totalCount,
+        int fromCode,
+        int fromConfiguration,
+        int fromEnvironment);
 }
