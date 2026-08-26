@@ -91,6 +91,32 @@ public sealed class HealthCheckTests
     }
 
     [Fact]
+    public async Task TheRegisteredProbesResolveAndAnswerThroughTheHealthCheckService()
+    {
+        // Registration alone proves nothing: the checks are internal and activated by the health
+        // check service, so this is what catches a check that cannot be constructed or a tag that
+        // selects the wrong one.
+        using var host = new HostBuilder()
+            .ConfigureServices(services => services.AddCadence())
+            .Build();
+
+        var checks = host.Services.GetRequiredService<HealthCheckService>();
+
+        var live = await checks.CheckHealthAsync(r => r.Tags.Contains("live"), default);
+        var readyBefore = await checks.CheckHealthAsync(r => r.Tags.Contains("ready"), default);
+
+        await host.StartAsync();
+        var readyAfter = await checks.CheckHealthAsync(r => r.Tags.Contains("ready"), default);
+        await host.StopAsync();
+
+        Assert.Equal(HealthStatus.Healthy, live.Status);
+        Assert.Equal(HealthStatus.Unhealthy, readyBefore.Status);
+        Assert.Equal(HealthStatus.Healthy, readyAfter.Status);
+        Assert.Equal("cadence-live", Assert.Single(live.Entries).Key);
+        Assert.Equal("cadence-ready", Assert.Single(readyAfter.Entries).Key);
+    }
+
+    [Fact]
     public void BothProbesAreRegisteredWithTheirTags()
     {
         var services = new ServiceCollection().AddCadence().BuildServiceProvider();
