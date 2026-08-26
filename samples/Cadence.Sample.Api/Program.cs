@@ -24,7 +24,7 @@ builder.Services.AddCadence(cadence =>
 
 if (builder.Environment.IsDevelopment())
 {
-    builder.Services.AddOpenApi();
+    builder.Services.AddOpenApi(openApi => openApi.AddCadenceTokenSecurity());
 }
 
 var app = builder.Build();

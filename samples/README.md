@@ -208,7 +208,10 @@ It listens on `http://localhost:5233` (`Urls` in `appsettings.json`) and
 `Development` also gets an OpenAPI document at `/openapi/v1.json` and Swagger UI over it at
 `/swagger` — the document comes from the framework's `AddOpenApi()`, and `Cadence.Api` declares each
 route's statuses and response shapes itself, so the schemas are the real ones. The **Authorize**
-button takes the token above.
+button takes the token above; it comes from `OpenApiSecurity.cs` in this sample rather than from the
+package, because describing a security scheme means referencing `Microsoft.AspNetCore.OpenApi` and
+`Cadence.Api` will not put that dependency on hosts that generate no document. Any host that wants
+the same button copies that file.
 
 Three jobs exist only so the endpoints have something to talk about:
 
