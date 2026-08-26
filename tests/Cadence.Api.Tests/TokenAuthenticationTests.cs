@@ -154,6 +154,29 @@ public sealed class TokenAuthenticationTests
     }
 
     [Fact]
+    public async Task CallingAddApiTwiceStillProducesAWorkingProvider()
+    {
+        // Every AddApi call appends another IConfigureOptions<AuthenticationOptions> that calls
+        // AddScheme, and AddScheme throws on a duplicate name. Unguarded, a second call fails host
+        // startup with "Scheme already exists: CadenceToken" -- and because AuthenticationOptions is
+        // app-wide, that takes the host's own authentication down with it. AddApi was two AddOptions
+        // calls before this scheme existed, so composing two libraries that both call it has always
+        // worked and has to keep working.
+        await using var host = await ApiTestHost.StartAsync(
+            api => api.Tokens.Add(Token),
+            services => services.AddCadence(cadence => cadence.AddApi()),
+            endpoints: MapProbe);
+
+        var authenticated = await host.Client.SendAsync(Request(Token, ProbePath));
+        var anonymous = await host.Client.GetAsync(PausePath);
+
+        // The token path still works, and still refuses: a guard that dropped the scheme instead of
+        // the duplicate would boot cleanly and authenticate nobody.
+        Assert.Equal(HttpStatusCode.OK, authenticated.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
+    [Fact]
     public async Task TheBuiltInPolicyIsAbsentWithNoTokenConfigured()
     {
         await using var host = await ApiTestHost.StartAsync(environment: Environments.Development);
