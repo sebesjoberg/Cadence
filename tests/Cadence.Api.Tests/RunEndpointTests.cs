@@ -198,7 +198,7 @@ public sealed class RunEndpointTests
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("\"status\":404", body, StringComparison.Ordinal);
-        Assert.Contains("problems/run-not-found", body, StringComparison.Ordinal);
+        Assert.Contains("urn:cadence:problem:run-not-found", body, StringComparison.Ordinal);
         Assert.Contains(runId.ToString(), body, StringComparison.Ordinal);
     }
 

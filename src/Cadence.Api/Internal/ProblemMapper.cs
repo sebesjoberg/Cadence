@@ -11,7 +11,9 @@ namespace Cadence.Api.Internal;
 /// </summary>
 internal static class ProblemMapper
 {
-    private const string Base = "https://cadence.dev/problems/";
+    // A URN, not an http URL: RFC 9457 wants an identifier, and we host no documentation to point
+    // at. One constant to change if the package is ever renamed.
+    private const string Base = "urn:cadence:problem:";
 
     /// <summary>Describes a refusal that arrived as an exception, or null when it is not one of ours.</summary>
     /// <param name="exception">The exception to describe.</param>

@@ -141,7 +141,7 @@ public sealed class JobEndpointTests
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("\"status\":404", body, StringComparison.Ordinal);
-        Assert.Contains("problems/job-not-found", body, StringComparison.Ordinal);
+        Assert.Contains("urn:cadence:problem:job-not-found", body, StringComparison.Ordinal);
         Assert.Contains("no-such-job", body, StringComparison.Ordinal);
     }
 

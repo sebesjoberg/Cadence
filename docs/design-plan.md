@@ -442,6 +442,10 @@ Status codes fall out of exceptions that already exist, as RFC 9457 `ProblemDeta
 | job not registered here | 404 | `JobNotFoundException` |
 | trigger kind not allowed | 400 | `TriggerNotAllowedException`, listing what the job does allow |
 
+`type` is a URN — `urn:cadence:problem:{slug}` — not an `https` URL. RFC 9457 wants an identifier,
+not necessarily a page, and an `https` type would name a domain nobody here controls and a project
+name that is not settled. One constant moves if either ever changes.
+
 Responses are explicit records behind a source-generated `JsonSerializerContext` rather than
 `JobRun` serialised directly, because otherwise every future storage column would be a public API
 change.
