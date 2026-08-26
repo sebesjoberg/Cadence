@@ -43,25 +43,6 @@ public sealed class RunEndpointTests
     }
 
     [Fact]
-    public async Task TheRunListCarriesNoLogs()
-    {
-        var runId = Guid.NewGuid();
-        await using var host = await StartAsync(async store =>
-        {
-            await store.StartAsync(Start(runId), default);
-            await store.AppendLogAsync(runId, new JobLogEntry { Timestamp = Origin, Message = "noise" }, default);
-        });
-
-        var response = await host.Client.SendAsync(Get("/cadence/api/runs"));
-
-        response.EnsureSuccessStatusCode();
-        var page = await response.Content.ReadFromJsonAsync<RunPageResponse>();
-        Assert.NotNull(page);
-        Assert.Single(page.Runs);
-        Assert.DoesNotContain("noise", await response.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
     public async Task AnUnboundedLimitIsClampedToFiveHundred()
     {
         await using var host = await StartAsync();

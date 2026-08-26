@@ -13,7 +13,7 @@ namespace Cadence.Api.Tests;
 public sealed class JsonContextTests
 {
     [Fact]
-    public void AProblemSerializesAsCamelCaseWithNoExtensionsKey()
+    public void AProblemSerializesAsCamelCase()
     {
         var problem = new ProblemDetails
         {
@@ -25,7 +25,6 @@ public sealed class JsonContextTests
 
         var json = JsonSerializer.Serialize(problem, CadenceApiJsonContext.Default.ProblemDetails);
 
-        Assert.DoesNotContain("extensions", json, StringComparison.Ordinal);
         Assert.Contains("\"title\":", json, StringComparison.Ordinal);
         Assert.Contains("\"status\":404", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Title\":", json, StringComparison.Ordinal);

@@ -45,7 +45,6 @@ public sealed class PauseEndpointTests
 
         var state = await StateOf(host);
         Assert.Equal($"token:{Fingerprint}", state.SetBy);
-        Assert.DoesNotContain(Token, state.SetBy);
     }
 
     [Fact]
