@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <RootNamespace>Cadence.Api</RootNamespace>
+    <Description>HTTP control surface for Cadence: trigger, run history and pause endpoints, token authentication and a fail-closed mapping gate.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cadence.Core\Cadence.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cadence.Api.Tests" />
+  </ItemGroup>
+
+</Project>

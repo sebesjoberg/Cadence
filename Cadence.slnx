@@ -1,12 +1,14 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Cadence.Abstractions/Cadence.Abstractions.csproj" />
+    <Project Path="src/Cadence.Api/Cadence.Api.csproj" />
     <Project Path="src/Cadence.Core/Cadence.Core.csproj" />
     <Project Path="src/Cadence.Storage.Redis/Cadence.Storage.Redis.csproj" />
     <Project Path="src/Cadence.Storage.Sql/Cadence.Storage.Sql.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Cadence.Storage.Conformance/Cadence.Storage.Conformance.csproj" />
+    <Project Path="tests/Cadence.Api.Tests/Cadence.Api.Tests.csproj" />
     <Project Path="tests/Cadence.Core.Tests/Cadence.Core.Tests.csproj" />
     <Project Path="tests/Cadence.Storage.Redis.Tests/Cadence.Storage.Redis.Tests.csproj" />
     <Project Path="tests/Cadence.Storage.Sql.Tests/Cadence.Storage.Sql.Tests.csproj" />
