@@ -138,7 +138,12 @@ the deploy rather than whoever finds the open endpoint first. Satisfy it one of 
   configured leaves it unregistered, and every request answers 500.
 - Set `AllowUnauthenticated = true`, for a deployment a proxy or mesh already authenticates. Logged
   as a warning on every start.
-- Run in `Development`, where mapping proceeds with a loud warning instead of a throw.
+- Run in `Development`, where mapping proceeds with a loud warning instead of a throw. The write
+  endpoints are reachable on that path — `POST /trigger` runs any registered job, `PUT /pause`
+  halts scheduling cluster-wide — so on this path alone Cadence answers **loopback callers only**
+  and returns 403 to anyone else. A container that shipped with
+  `ASPNETCORE_ENVIRONMENT=Development` is therefore embarrassing rather than exploitable; localhost
+  sees no difference.
 
 ### Tokens
 
@@ -146,18 +151,32 @@ Tokens are read from `Cadence:Api:Tokens` in configuration and from `CADENCE_API
 (comma-separated — `Cadence__Api__Tokens__0=` is miserable to write in a compose file), on top of
 anything set in code. Boot logs how many tokens each source supplied, never a value.
 
+**Use a high-entropy token** — `openssl rand -hex 32`. A pause records the caller as
+`token:{first 8 hex of the token's SHA-256}`, readable by anyone who can read `GET /pause`, and that
+fingerprint is an offline confirmation oracle against a guessable token: a guess can be checked
+without ever touching this service.
+
+**Rotating a token requires a restart.** The accepted set is built once from `IOptions<>`, not
+`IOptionsMonitor<>`, so editing `Cadence:Api:Tokens` in a reload-on-change file changes nothing
+until the process restarts.
+
 ### Health
 
 | Path | Tag | Access |
 |---|---|---|
-| `/health/live` | `live` | anonymous |
-| `/health/ready` | `ready` | anonymous |
+| `/health/live` | `cadence.live` | anonymous |
+| `/health/ready` | `cadence.ready` | anonymous |
 | `/cadence/api/health/storage` | `cadence.storage` | behind the gate |
 
 The tags are documented contract: an app that already maps its own `/health` can compose them by
-hand instead of calling `MapCadenceHealth()`. Storage health is never on `live` or `ready` — every
+hand instead of calling `MapCadenceHealth()`. Storage health is never on the probe tags — every
 replica shares one store, so a probe that can see the store takes every pod out of service on the
 same blip, during exactly the incident someone needs the service up to investigate.
+
+All three tags are namespaced for the same reason. `MapCadenceHealth()` selects purely by tag, so a
+check of your own tagged `live` or `ready` — the way the ASP.NET Core documentation writes them —
+joins neither probe. Tag it `cadence.ready` only if you genuinely want a readiness failure on every
+replica at once.
 
 **HTTPS is documented, not enforced.** A bearer token over plaintext is a leaked token, but TLS
 terminates at the ingress in every real deployment, and Cadence has no reliable way to tell whether

@@ -287,6 +287,17 @@ the claim; pulling work from a queue instead of executing what was claimed (§14
 stop deciding who works at all, which is why the cheaper fix waits on the better one. §14.3 records
 what the finding costs under an orchestrator, where an autoscaler adds replicas that win nothing.
 
+### 9.5 `Cadence.Core` takes the full health-checks package, not the abstractions
+
+v0.3's constraint was that health checks enter Core through
+`Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` only. Core references
+`Microsoft.Extensions.Diagnostics.HealthChecks` instead, because `AddHealthChecks()` and `AddCheck`
+live in the larger package and there is no way to register a check without them. The spirit of the
+constraint holds — a test asserts `Cadence.Core`'s assembly carries no reference to
+`Microsoft.AspNetCore.*`, even transitively — but the cost is real and worth naming: every Core
+consumer now gets `DefaultHealthCheckService` and the health-check publisher hosted service, the
+latter inert with no publisher registered. Recorded so nobody rediscovers it as a violation.
+
 ---
 
 ## 10. The end-to-end samples
@@ -396,6 +407,10 @@ app.MapCadenceApi();          // v0.3
 // app.MapCadenceDashboard(); // v0.4
 ```
 
+`MapCadenceApi()` returns the `RouteGroupBuilder` it mounted, so a host can attach its own
+conventions — rate limiting, CORS, OpenAPI metadata — to the tree it just added. For endpoints that
+start jobs, rate limiting is a realistic ask.
+
 ### 13.2 The surface, and the one write that is not on it
 
 ```
@@ -469,7 +484,7 @@ Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
 | `options.RequireAuthorization("policy")` | maps; the host's policy governs |
 | one or more tokens configured | maps; built-in policy requires an authenticated `CadenceToken` |
 | `options.AllowUnauthenticated = true` | maps, warning logged **every start** |
-| none of those, `IsDevelopment()` | maps, loud warning |
+| none of those, `IsDevelopment()` | maps, loud warning, **loopback callers only** |
 | none of those, anything else | **throws**, naming all three remedies |
 
 The composition rule is one sentence: **a named policy governs alone, and the token scheme
@@ -485,6 +500,22 @@ until after it. The policy is deferred on the identical condition as the scheme:
 scheme that was never registered is a 500 on every request, and the deployments that would hit that
 are `AllowUnauthenticated` and Development — exactly where an operator least expects a hard
 failure.
+
+**The Development branch answers loopback callers only.** An endpoint filter on the group returns
+403 with a `ProblemDetails` naming all three remedies when `RemoteIpAddress` is not loopback. It is
+applied on that branch alone — not to `AllowUnauthenticated`, where a proxy or mesh in front makes
+every legitimate caller non-loopback, and not where a policy was applied, where the request is
+already authenticated. The case it closes is `ASPNETCORE_ENVIRONMENT=Development` surviving into a
+container, which is among the commonest .NET misconfigurations and cost nothing before this
+milestone; it now exposes "run any registered job" and "halt scheduling cluster-wide" to whatever
+can reach the port. A developer on localhost sees no difference at all, which is why this is a
+filter and not a second flag.
+
+**A null `RemoteIpAddress` counts as loopback.** Kestrel over TCP always fills it in, so nothing
+arriving over the network is null; null means a transport with no IP peer — an in-memory
+`TestServer`, a Unix domain socket, a named pipe — none of which is the exposed TCP port the filter
+exists to close. Refusing null instead would 403 every in-memory test host and every socket-fronted
+deployment while closing nothing.
 
 `AllowUnauthenticated` exists for an authenticating proxy or an mTLS mesh, and because without it
 people reach for something worse — an anonymous wrapper, or a second port with no gate on it. One
@@ -509,8 +540,8 @@ records `api`.
 
 | Check | Tag | Registered by |
 |---|---|---|
-| `cadence-live` | `live` | `AddCadence()` — the process is up |
-| `cadence-ready` | `ready` | `AddCadence()` — boot probe passed, jobs registered |
+| `cadence-live` | `cadence.live` | `AddCadence()` — the process is up |
+| `cadence-ready` | `cadence.ready` | `AddCadence()` — boot probe passed, jobs registered |
 | `cadence-sql` | `cadence.storage` | `UseSqlStorage()` — `SELECT 1` |
 | `cadence-redis` | `cadence.storage` | `UseRedisStorage()` — `PING` |
 
@@ -538,6 +569,13 @@ the tests that exercise it against a live SQL Server or Redis are written but ha
 machine, where Docker is unavailable, so nothing here should be read as verified against a real
 store.
 
+**All three tags are namespaced, and that is what makes the guarantee hold under composition.**
+`MapCadenceHealth()` selects purely by tag, so bare `live` and `ready` would silently adopt a host
+check written the way the ASP.NET Core documentation writes them — `AddSqlServer(cs, tags:
+["ready"])` — and put that database back on the readiness probe by the front door, which is the
+cluster-wide 503 this whole section exists to prevent. A host check tagged `live` or `ready` now
+joins neither probe.
+
 Storage checks are registered by the storage packages as ordinary `IHealthCheck`s, which needs no
 new Cadence seam. `MapCadenceHealth()` is a convenience with configurable paths; the tags are
 documented so an app that already maps `/health` composes its own. The access split is
@@ -546,9 +584,12 @@ load-bearing:
 - `/health/live`, `/health/ready` — **anonymous**. The kubelet cannot present a token.
 - `/cadence/api/health/storage` — **behind the gate**. It returns the last store error.
 
-`AddCadence()`, `UseSqlStorage()` and `UseRedisStorage()` are each safe to call twice; health-check
-registration is guarded explicitly, because the health check service throws on a duplicate
-registration name where the rest of DI would just overwrite.
+`AddCadence()`, `UseSqlStorage()`, `UseRedisStorage()` and `AddApi()` are each safe to call twice.
+Health-check registration is guarded explicitly, because the health check service throws on a
+duplicate registration name where the rest of DI would just overwrite; `AddApi`'s deferred
+`AddScheme` is guarded on `SchemeMap` for the same reason, and there the blast radius is wider —
+`AuthenticationOptions` is app-wide, so an unguarded duplicate takes the *host's* authentication
+down with Cadence's.
 
 ### 13.5 Identity, and the tier that has no store
 
