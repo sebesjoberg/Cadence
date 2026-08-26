@@ -116,7 +116,7 @@ app.MapCadenceHealth();
 | `GET /cadence/api/runs` | run history, filtered by `job`, `status`, `from`, `to`, `instance`, `limit`, `offset` |
 | `GET /cadence/api/runs/{id}` | one run, including its log |
 | `GET /cadence/api/pause` | the current pause switches |
-| `PUT /cadence/api/pause` | changes them |
+| `PUT /cadence/api/pause` | changes them — 204, or 400 for a scope outside the defined flags |
 | `GET /cadence/api/health/storage` | storage health, for humans and the dashboard |
 
 Schedule edits are not on this tree, on purpose: a triggered run is loud, appears in history, and is

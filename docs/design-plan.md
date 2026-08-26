@@ -441,6 +441,7 @@ Status codes fall out of exceptions that already exist, as RFC 9457 `ProblemDeta
 | triggers paused | 409 | `SchedulerPausedException`, with who paused it and why |
 | job not registered here | 404 | `JobNotFoundException` |
 | trigger kind not allowed | 400 | `TriggerNotAllowedException`, listing what the job does allow |
+| pause scope not a defined flag | 400 | `ProblemMapper.InvalidPauseScope` — `Enum.TryParse` accepts bare numbers, so the parsed scope is masked against the defined members |
 
 `type` is a URN — `urn:cadence:problem:{slug}` — not an `https` URL. RFC 9457 wants an identifier,
 not necessarily a page, and an `https` type would name a domain nobody here controls and a project
