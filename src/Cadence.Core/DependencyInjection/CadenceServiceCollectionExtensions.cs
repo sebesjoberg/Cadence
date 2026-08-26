@@ -60,13 +60,24 @@ public static class CadenceServiceCollectionExtensions
 
         services.TryAddSingleton<CadenceReadiness>();
 
-        // Neither check is given a store, so neither can fail on one. §13.4: every replica shares
-        // one store, so a store-honest readiness probe empties the service on every pod at once.
-        services.AddHealthChecks()
-            .AddCheck<LivenessHealthCheck>("cadence-live", tags: ["live"])
-            .AddCheck<ReadinessHealthCheck>("cadence-ready", tags: ["ready"]);
-
         var descriptors = builder.Jobs.ToList();
+
+        // Neither check is given a store, so neither can fail on one. §13.4: every replica shares
+        // one store, so a store-honest readiness probe empties the service on every pod at once. The
+        // job count is passed by value for the same reason - the registry is in-process today, but a
+        // probe that holds it would inherit whatever the registry becomes.
+        //
+        // Guarded because AddCheck appends unconditionally and the health check service rejects
+        // duplicate names: without this, calling AddCadence twice - which has always worked - would
+        // throw on the first resolve of HealthCheckService.
+        if (!services.Any(service => service.ImplementationType == typeof(CadenceHostedService)))
+        {
+            services.AddHealthChecks()
+                .AddCheck<LivenessHealthCheck>("cadence-live", tags: ["live"])
+                .AddTypeActivatedCheck<ReadinessHealthCheck>(
+                    "cadence-ready", failureStatus: null, tags: ["ready"], args: descriptors.Count);
+        }
+
         services.AddSingleton<IJobRegistry>(_ => new JobRegistry(descriptors));
         services.AddSingleton(new RegistrationDiagnostics(builder.Warnings));
 

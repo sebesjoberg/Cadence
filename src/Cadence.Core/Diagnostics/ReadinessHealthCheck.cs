@@ -2,22 +2,27 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Cadence.Diagnostics;
 
-/// <summary>Reports whether boot completed and jobs are registered.</summary>
+/// <summary>Reports whether boot completed, and how many jobs were registered.</summary>
+/// <remarks>
+/// Holds a flag and a count, and nothing else. The count is captured at registration rather than
+/// read from <see cref="IJobRegistry"/> so that the day the job list becomes store-derived, this
+/// probe does not silently acquire I/O while the guarantee it advertises stays green.
+/// </remarks>
 internal sealed class ReadinessHealthCheck : IHealthCheck
 {
     private readonly CadenceReadiness _readiness;
-    private readonly IJobRegistry _registry;
+    private readonly int _jobCount;
 
     /// <summary>Creates the check.</summary>
     /// <param name="readiness">The boot flag.</param>
-    /// <param name="registry">The registered jobs, for the count in the description.</param>
-    public ReadinessHealthCheck(CadenceReadiness readiness, IJobRegistry registry)
+    /// <param name="jobCount">How many jobs were registered, for the description.</param>
+    public ReadinessHealthCheck(CadenceReadiness readiness, int jobCount)
     {
         ArgumentNullException.ThrowIfNull(readiness);
-        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentOutOfRangeException.ThrowIfNegative(jobCount);
 
         _readiness = readiness;
-        _registry = registry;
+        _jobCount = jobCount;
     }
 
     /// <inheritdoc />
@@ -25,6 +30,6 @@ internal sealed class ReadinessHealthCheck : IHealthCheck
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
         => Task.FromResult(_readiness.IsReady
-            ? HealthCheckResult.Healthy($"Scheduling {_registry.All.Count} job(s).")
+            ? HealthCheckResult.Healthy($"Scheduling {_jobCount} job(s).")
             : HealthCheckResult.Unhealthy("Cadence has not finished starting."));
 }

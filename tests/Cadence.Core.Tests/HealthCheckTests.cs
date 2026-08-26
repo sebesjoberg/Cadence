@@ -1,5 +1,4 @@
 using Cadence.Diagnostics;
-using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -13,13 +12,13 @@ namespace Cadence.Core.Tests;
 /// </summary>
 public sealed class HealthCheckTests
 {
-    private static readonly Type[] Stores =
-    [
-        typeof(IRunHistoryStore),
-        typeof(IScheduleSource),
-        typeof(IPauseStore),
-        typeof(IOccurrenceCoordinator),
-    ];
+    /// <summary>
+    /// Everything a probe is allowed to hold. An allow-list, not a list of banned stores: a blacklist
+    /// of the four store interfaces stays green for <c>IServiceProvider</c>, <c>Func&lt;IPauseStore&gt;</c>,
+    /// <c>Lazy&lt;T&gt;</c>, or any store interface added in a later version - every one of which hands
+    /// the probe a store.
+    /// </summary>
+    private static readonly Type[] Allowed = [typeof(CadenceReadiness), typeof(int)];
 
     [Theory]
     [InlineData(typeof(LivenessHealthCheck))]
@@ -30,7 +29,16 @@ public sealed class HealthCheckTests
             .SelectMany(constructor => constructor.GetParameters())
             .Select(parameter => parameter.ParameterType);
 
-        Assert.Empty(parameters.Intersect(Stores));
+        Assert.Empty(parameters.Except(Allowed));
+    }
+
+    [Fact]
+    public void CoreCarriesNoReferenceToAspNetCore()
+    {
+        // The one global constraint that was previously checked only by reading a report.
+        Assert.DoesNotContain(
+            "Microsoft.AspNetCore",
+            typeof(CadenceReadiness).Assembly.GetReferencedAssemblies().Select(a => a.Name));
     }
 
     [Fact]
@@ -46,7 +54,7 @@ public sealed class HealthCheckTests
     public async Task ReadinessIsUnhealthyUntilBootHasPassed()
     {
         var readiness = new CadenceReadiness();
-        var check = new ReadinessHealthCheck(readiness, new JobRegistry([]));
+        var check = new ReadinessHealthCheck(readiness, jobCount: 0);
 
         var before = await check.CheckHealthAsync(new HealthCheckContext(), default);
         readiness.MarkReady();
@@ -114,6 +122,32 @@ public sealed class HealthCheckTests
         Assert.Equal(HealthStatus.Healthy, readyAfter.Status);
         Assert.Equal("cadence-live", Assert.Single(live.Entries).Key);
         Assert.Equal("cadence-ready", Assert.Single(readyAfter.Entries).Key);
+
+        // The count is captured at registration rather than read from the registry, so pin that the
+        // two still agree - and on a non-zero count, since the test assembly has an attributed job.
+        var registered = host.Services.GetRequiredService<IJobRegistry>().All.Count;
+        Assert.NotEqual(0, registered);
+        Assert.Equal(
+            $"Scheduling {registered} job(s).",
+            Assert.Single(readyAfter.Entries).Value.Description);
+    }
+
+    [Fact]
+    public async Task CallingAddCadenceTwiceStillProducesAWorkingProvider()
+    {
+        // Registering the probes must not take away something AddCadence could always do. AddCheck
+        // appends unconditionally and the health check service refuses duplicate names, so an
+        // unguarded second call breaks every consumer who composes two libraries that both call it.
+        var services = new ServiceCollection().AddLogging()
+            .AddCadence()
+            .AddCadence()
+            .BuildServiceProvider();
+
+        var report = await services.GetRequiredService<HealthCheckService>()
+            .CheckHealthAsync(default);
+
+        Assert.Equal(HealthStatus.Unhealthy, report.Status);
+        Assert.Equal(2, report.Entries.Count);
     }
 
     [Fact]
