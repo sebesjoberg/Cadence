@@ -17,7 +17,7 @@ internal static class ProblemMapper
     /// <param name="exception">The exception to describe.</param>
     public static ProblemDetails? Describe(Exception exception) => exception switch
     {
-        JobNotFoundException ex => Problem(404, "job-not-found", "Job not found", ex.Message),
+        JobNotFoundException ex => JobNotFound(ex.JobName),
         TriggerNotAllowedException ex => Problem(400, "trigger-not-allowed", "Trigger not allowed", ex.Message),
         SchedulerPausedException ex => Problem(409, "scheduler-paused", "Triggers are paused", ex.Message),
         _ => null,
@@ -34,6 +34,14 @@ internal static class ProblemMapper
         "run-skipped",
         "No run was started",
         $"'{jobName}' was not started: {result.SkipReason}");
+
+    /// <summary>Describes a name that matches no registered job.</summary>
+    /// <param name="jobName">The name that was not found.</param>
+    public static ProblemDetails JobNotFound(string jobName) => Problem(
+        404,
+        "job-not-found",
+        "Job not found",
+        $"No job is registered under the name '{jobName}'.");
 
     /// <summary>Describes a run that no longer exists, or never did.</summary>
     /// <param name="runId">The id that matched nothing.</param>

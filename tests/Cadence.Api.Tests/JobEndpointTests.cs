@@ -76,6 +76,75 @@ public sealed class JobEndpointTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task TheJobDetailAsksTheStoreNotToAttachLogs()
+    {
+        RecordingRunHistoryStore? recorder = null;
+        await using var host = await ApiTestHost.StartAsync(
+            api => api.Tokens.Add(Token),
+            services: collection => recorder = RecordingRunHistoryStore.Install(collection));
+        Assert.NotNull(recorder);
+        recorder.Clear();
+
+        var response = await host.Client.SendAsync(Get($"/cadence/api/jobs/{ApiTestJobs.NightlyName}"));
+
+        response.EnsureSuccessStatusCode();
+        Assert.False(Assert.Single(recorder.Queries).IncludeLog);
+    }
+
+    [Fact]
+    public async Task TheNextOccurrenceIsReportedInUtcEvenForAZonedJob()
+    {
+        await using var host = await StartAsync();
+
+        var response = await host.Client.SendAsync(Get($"/cadence/api/jobs/{ApiTestJobs.ZonedName}"));
+
+        response.EnsureSuccessStatusCode();
+        var detail = await response.Content.ReadFromJsonAsync<JobDetailResponse>();
+        Assert.NotNull(detail);
+        Assert.Equal(ApiTestJobs.ZonedTimeZone, detail.Job.TimeZone);
+        Assert.NotNull(detail.Job.NextOccurrenceUtc);
+        Assert.Equal(TimeSpan.Zero, detail.Job.NextOccurrenceUtc.Value.Offset);
+    }
+
+    // AllowUnauthenticated is a statement about what Cadence adds, not a licence to drop a token
+    // the operator also configured. The policy still applies, so the "no authentication" warning
+    // must not fire alongside it.
+    [Fact]
+    public async Task AllowUnauthenticatedAlongsideATokenStillEnforcesTheToken()
+    {
+        var logs = new LogCapture();
+        await using var host = await ApiTestHost.StartAsync(
+            api =>
+            {
+                api.AllowUnauthenticated = true;
+                api.Tokens.Add(Token);
+            },
+            logs: logs);
+
+        var anonymous = await host.Client.GetAsync("/cadence/api/jobs");
+        var authenticated = await host.Client.SendAsync(Get("/cadence/api/jobs"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, authenticated.StatusCode);
+        Assert.False(logs.HasWarning(3001));
+    }
+
+    [Fact]
+    public async Task AnUnregisteredJobIsRefusedWithAProblemBody()
+    {
+        await using var host = await StartAsync();
+
+        var response = await host.Client.SendAsync(Get("/cadence/api/jobs/no-such-job"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"status\":404", body, StringComparison.Ordinal);
+        Assert.Contains("problems/job-not-found", body, StringComparison.Ordinal);
+        Assert.Contains("no-such-job", body, StringComparison.Ordinal);
+    }
+
     // The built-in policy is registered only when a token is, so applying it regardless would
     // authenticate against a scheme that is not there — a 500 on every request in exactly the two
     // deployments that expect none.

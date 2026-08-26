@@ -34,18 +34,24 @@ public static class CadenceApiEndpointExtensions
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Cadence.Api");
         var authenticated = options.PolicyName is not null || options.Tokens.Count > 0;
 
-        if (options.AllowUnauthenticated)
+        // Nested on !authenticated so that AllowUnauthenticated set alongside a token or a policy
+        // says nothing: the policy below is still applied, and warning that no authentication is
+        // performed would contradict what the request path actually does. The 3002 token line is
+        // what tells that operator their tokens are enforced.
+        if (!authenticated)
         {
-            logger.MappedWithAuthenticationDisabled(options.BasePath);
-        }
-        else if (!authenticated)
-        {
-            if (!environment.IsDevelopment())
+            if (options.AllowUnauthenticated)
+            {
+                logger.MappedWithAuthenticationDisabled(options.BasePath);
+            }
+            else if (!environment.IsDevelopment())
             {
                 throw new CadenceStartupException(GateFailureMessage);
             }
-
-            logger.MappedUnauthenticatedInDevelopment();
+            else
+            {
+                logger.MappedUnauthenticatedInDevelopment();
+            }
         }
 
         // Only when tokens exist: "0 tokens" on every start of an AllowUnauthenticated deployment is
@@ -79,6 +85,10 @@ public static class CadenceApiEndpointExtensions
             group.RequireAuthorization(CadenceTokenDefaults.Policy);
         }
 
+        // Every handler returns JsonHttpResult<T> so the responses go out through the package's own
+        // source-generated context. That type contributes no typed-200 metadata, so anything added
+        // to an OpenAPI document here would describe the statuses and not the schemas. There is no
+        // OpenAPI surface today; whoever adds AddOpenApi() will need .Produces<T>() alongside it.
         JobEndpoints.Map(group);
         RunEndpoints.Map(group);
 

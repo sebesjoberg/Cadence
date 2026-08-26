@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using Cadence.Execution;
 using Cadence.Scheduling;
 using Cadence.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -57,7 +56,7 @@ internal static class JobEndpoints
     {
         if (!registry.TryGet(name, out var descriptor) || descriptor is null)
         {
-            return ProblemMapper.AsResult(ProblemMapper.Describe(new JobNotFoundException(name))!);
+            return ProblemMapper.AsResult(ProblemMapper.JobNotFound(name));
         }
 
         var resolution = await resolver.ResolveAsync(cancellationToken);
@@ -94,6 +93,6 @@ internal static class JobEndpoints
             (schedule?.TimeZone ?? descriptor.DefaultTimeZone).Id,
             schedule?.Enabled ?? descriptor.DefaultEnabled,
             descriptor.AllowedTriggers.ToString(),
-            schedule?.NextOccurrenceAfter(now),
+            Responses.Utc(schedule?.NextOccurrenceAfter(now)),
             lastRun is null ? null : Responses.ToSummary(lastRun));
 }
