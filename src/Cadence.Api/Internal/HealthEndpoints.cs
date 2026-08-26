@@ -18,7 +18,8 @@ internal static class HealthEndpoints
     {
         // On the group, not the bare endpoint builder: this route returns the last store error,
         // which is operator information, and a route mapped outside the group is an open one.
-        group.MapGet("/health/storage", GetAsync);
+        group.MapGet("/health/storage", GetAsync)
+            .Produces<StorageHealthResponse>();
     }
 
     private static async Task<JsonHttpResult<StorageHealthResponse>> GetAsync(

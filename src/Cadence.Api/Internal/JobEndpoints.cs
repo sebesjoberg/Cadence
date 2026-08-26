@@ -18,9 +18,18 @@ internal static class JobEndpoints
     /// <param name="group">The group the control surface mounts under.</param>
     public static void Map(IEndpointRouteBuilder group)
     {
-        group.MapGet("/jobs", ListAsync);
-        group.MapGet("/jobs/{name}", GetAsync);
-        group.MapPost("/jobs/{name}/trigger", TriggerAsync);
+        group.MapGet("/jobs", ListAsync)
+            .Produces<IReadOnlyList<JobSummaryResponse>>();
+
+        group.MapGet("/jobs/{name}", GetAsync)
+            .Produces<JobDetailResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/jobs/{name}/trigger", TriggerAsync)
+            .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
 
     private static async Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> TriggerAsync(

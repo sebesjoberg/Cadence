@@ -18,8 +18,12 @@ internal static class PauseEndpoints
     /// <param name="group">The group the control surface mounts under.</param>
     public static void Map(IEndpointRouteBuilder group)
     {
-        group.MapGet("/pause", GetAsync);
-        group.MapPut("/pause", SetAsync);
+        group.MapGet("/pause", GetAsync)
+            .Produces<PauseResponse>();
+
+        group.MapPut("/pause", SetAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest);
     }
 
     private static async Task<JsonHttpResult<PauseResponse>> GetAsync(

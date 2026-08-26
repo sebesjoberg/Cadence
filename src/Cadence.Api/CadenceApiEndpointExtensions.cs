@@ -99,10 +99,9 @@ public static class CadenceApiEndpointExtensions
         }
 
         // Every handler with a body returns JsonHttpResult<T>, so the responses go out through the
-        // package's own source-generated context. That type contributes no typed-200 metadata, so
-        // anything added to an OpenAPI document here would describe the statuses and not the
-        // schemas. There is no OpenAPI surface today; whoever adds AddOpenApi() will need
-        // .Produces<T>() alongside it.
+        // package's own source-generated context — and that type contributes no metadata of its own.
+        // Each route below therefore declares its statuses and shapes with .Produces<T>(), which is
+        // what a host's AddOpenApi() reads; without it the document would list empty schemas.
         JobEndpoints.Map(group);
         RunEndpoints.Map(group);
         PauseEndpoints.Map(group);

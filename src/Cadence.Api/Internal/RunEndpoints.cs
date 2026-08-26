@@ -20,8 +20,15 @@ internal static class RunEndpoints
     /// <param name="group">The group the control surface mounts under.</param>
     public static void Map(IEndpointRouteBuilder group)
     {
-        group.MapGet("/runs", QueryAsync);
-        group.MapGet("/runs/{id:guid}", GetAsync);
+        // The 400 carries no body: an unparseable status, from, to, limit or offset fails parameter
+        // binding before any filter of ours could render a problem document (§13.2).
+        group.MapGet("/runs", QueryAsync)
+            .Produces<RunPageResponse>()
+            .Produces(StatusCodes.Status400BadRequest);
+
+        group.MapGet("/runs/{id:guid}", GetAsync)
+            .Produces<RunDetailResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
     private static async Task<JsonHttpResult<RunPageResponse>> QueryAsync(
