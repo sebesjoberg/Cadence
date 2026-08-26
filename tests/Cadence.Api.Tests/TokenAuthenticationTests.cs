@@ -1,13 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Cadence.Api.Internal;
+using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -21,30 +21,23 @@ public sealed class TokenAuthenticationTests
     /// <summary>The first eight lowercase hex of SHA-256(Token), computed outside this codebase.</summary>
     private const string Fingerprint = "bb60af61";
 
+    /// <summary>The claim a host's own policy or handler would read the token off, as a string.</summary>
+    private const string TokenClaim = "cadence:token";
+
     private const string ProbePath = "/probe";
 
     private const string PausePath = "/cadence/api/pause";
 
-    [Fact]
-    public void TheCorrectTokenMatchesAndReturnsItsFingerprint()
-    {
-        var tokens = new TokenSet([Token]);
+    /// <summary>Stands in for a policy the host owns, naming Cadence's public scheme constant.</summary>
+    private const string ProbePolicy = "cadence-probe";
 
-        Assert.Equal(Fingerprint, tokens.Match(Token));
-    }
-
-    [Fact]
-    public void AWrongTokenMatchesNothing()
-    {
-        var tokens = new TokenSet([Token]);
-
-        Assert.Null(tokens.Match("not-the-token-but-the-same-length"));
-    }
+    /// <summary>A host default scheme that authenticates nobody, so the token's route matters.</summary>
+    private const string HostDefaultScheme = "HostDefault";
 
     [Fact]
     public async Task ACorrectTokenIsAuthenticated()
     {
-        await using var host = await ApiTestHost.StartAsync(api => api.Tokens.Add(Token), endpoints: MapProbe);
+        await using var host = await StartWithProbeAsync(api => api.Tokens.Add(Token));
 
         var response = await host.Client.SendAsync(Request(Token, ProbePath));
 
@@ -54,7 +47,7 @@ public sealed class TokenAuthenticationTests
     [Fact]
     public async Task TheAuthenticatedPrincipalIsNamedForTheTokenFingerprint()
     {
-        await using var host = await ApiTestHost.StartAsync(api => api.Tokens.Add(Token), endpoints: MapProbe);
+        await using var host = await StartWithProbeAsync(api => api.Tokens.Add(Token));
 
         var response = await host.Client.SendAsync(Request(Token, ProbePath));
 
@@ -99,9 +92,8 @@ public sealed class TokenAuthenticationTests
     [Fact]
     public async Task TokensBindFromConfiguration()
     {
-        await using var host = await ApiTestHost.StartAsync(
-            configuration: new Dictionary<string, string?> { ["Cadence:Api:Tokens:0"] = Token },
-            endpoints: MapProbe);
+        await using var host = await StartWithProbeAsync(
+            configuration: new Dictionary<string, string?> { ["Cadence:Api:Tokens:0"] = Token });
 
         var response = await host.Client.SendAsync(Request(Token, ProbePath));
 
@@ -111,12 +103,11 @@ public sealed class TokenAuthenticationTests
     [Fact]
     public async Task TokensBindFromTheEnvironmentVariableSplitOnCommas()
     {
-        await using var host = await ApiTestHost.StartAsync(
+        await using var host = await StartWithProbeAsync(
             configuration: new Dictionary<string, string?>
             {
                 ["CADENCE_API_TOKEN"] = $" first-token-value-32-chars-long , {Token} ,",
-            },
-            endpoints: MapProbe);
+            });
 
         var response = await host.Client.SendAsync(Request(Token, ProbePath));
 
@@ -158,14 +149,10 @@ public sealed class TokenAuthenticationTests
     {
         // Every AddApi call appends another IConfigureOptions<AuthenticationOptions> that calls
         // AddScheme, and AddScheme throws on a duplicate name. Unguarded, a second call fails host
-        // startup with "Scheme already exists: CadenceToken" -- and because AuthenticationOptions is
-        // app-wide, that takes the host's own authentication down with it. AddApi was two AddOptions
-        // calls before this scheme existed, so composing two libraries that both call it has always
-        // worked and has to keep working.
-        await using var host = await ApiTestHost.StartAsync(
+        // startup and takes the host's own app-wide authentication down with it.
+        await using var host = await StartWithProbeAsync(
             api => api.Tokens.Add(Token),
-            services => services.AddCadence(cadence => cadence.AddApi()),
-            endpoints: MapProbe);
+            services => services.AddCadence(cadence => cadence.AddApi()));
 
         var authenticated = await host.Client.SendAsync(Request(Token, ProbePath));
         var anonymous = await host.Client.GetAsync(PausePath);
@@ -176,31 +163,28 @@ public sealed class TokenAuthenticationTests
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
     }
 
+    // The built-in policy has to name the token scheme rather than lean on the default one, or a
+    // host with its own default scheme authenticates that scheme on Cadence's routes and every token
+    // holder gets a 401. The host default here deliberately authenticates nobody, so a 200 can only
+    // come from the token scheme being named.
     [Fact]
-    public async Task TheBuiltInPolicyIsAbsentWithNoTokenConfigured()
+    public async Task TheBuiltInPolicyNamesTheTokenSchemeEvenWhenTheHostHasAnotherDefault()
     {
-        await using var host = await ApiTestHost.StartAsync(environment: Environments.Development);
+        await using var host = await ApiTestHost.StartAsync(
+            api => api.Tokens.Add(Token),
+            services => services
+                .AddAuthentication(HostDefaultScheme)
+                .AddScheme<AuthenticationSchemeOptions, NeverAuthenticates>(HostDefaultScheme, _ => { }));
 
-        var policies = host.Services.GetRequiredService<IAuthorizationPolicyProvider>();
+        var authenticated = await host.Client.SendAsync(Request(Token, PausePath));
+        var anonymous = await host.Client.GetAsync(PausePath);
 
-        Assert.Null(await policies.GetPolicyAsync(CadenceTokenDefaults.Policy));
+        Assert.Equal(HttpStatusCode.OK, authenticated.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
     }
 
-    [Fact]
-    public async Task TheBuiltInPolicyNamesTheTokenSchemeOnceATokenIsConfigured()
-    {
-        await using var host = await ApiTestHost.StartAsync(api => api.Tokens.Add(Token));
-
-        var policy = await host.Services.GetRequiredService<IAuthorizationPolicyProvider>()
-            .GetPolicyAsync(CadenceTokenDefaults.Policy);
-
-        Assert.NotNull(policy);
-        Assert.Contains(CadenceApiDefaults.AuthenticationScheme, policy.AuthenticationSchemes);
-    }
-
-    // The symptom half of the finding above: a policy naming a scheme that is not registered throws
-    // when it is evaluated, which would be a 500 on every request in exactly the deployments that
-    // configure no token. Only a mapped route can show that, and now there is one.
+    // A policy naming a scheme that is not registered throws when it is evaluated, which would be a
+    // 500 on every request in exactly the deployments that configure no token.
     [Fact]
     public async Task WithNoTokenConfiguredAMappedRouteStillAnswers()
     {
@@ -222,19 +206,46 @@ public sealed class TokenAuthenticationTests
         Assert.Contains(logs.Records, record => record.EventId == 3002);
     }
 
-    // The probe lives here rather than in Cadence.Api because the routes this scheme guards are
-    // mapped by a later task, and a production endpoint added to satisfy a test is worse to own.
+    // The probe lives here rather than in Cadence.Api because a production endpoint added to satisfy
+    // a test is worse to own. Its policy is the host's, not Cadence's built-in one.
     private static void MapProbe(IEndpointRouteBuilder endpoints) =>
         endpoints.MapGet(
                 ProbePath,
                 (HttpContext context) =>
-                    $"{context.User.Identity!.Name}|{context.User.FindFirst(CadenceTokenDefaults.TokenClaim)?.Value}")
-            .RequireAuthorization(CadenceTokenDefaults.Policy);
+                    $"{context.User.Identity!.Name}|{context.User.FindFirst(TokenClaim)?.Value}")
+            .RequireAuthorization(ProbePolicy);
+
+    private static Task<ApiTestHost> StartWithProbeAsync(
+        Action<CadenceApiOptions>? configure = null,
+        Action<IServiceCollection>? services = null,
+        IDictionary<string, string?>? configuration = null) =>
+        ApiTestHost.StartAsync(
+            configure,
+            collection =>
+            {
+                collection.AddAuthorizationBuilder().AddPolicy(
+                    ProbePolicy,
+                    policy => policy
+                        .AddAuthenticationSchemes(CadenceApiDefaults.AuthenticationScheme)
+                        .RequireAuthenticatedUser());
+                services?.Invoke(collection);
+            },
+            configuration: configuration,
+            endpoints: MapProbe);
 
     private static HttpRequestMessage Request(string token, string path)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
+    }
+
+    private sealed class NeverAuthenticates(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync() =>
+            Task.FromResult(AuthenticateResult.NoResult());
     }
 }
