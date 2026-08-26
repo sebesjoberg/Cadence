@@ -58,6 +58,14 @@ public static class CadenceServiceCollectionExtensions
         services.AddOptions<CadenceOptions>();
         services.AddMetrics();
 
+        services.TryAddSingleton<CadenceReadiness>();
+
+        // Neither check is given a store, so neither can fail on one. §13.4: every replica shares
+        // one store, so a store-honest readiness probe empties the service on every pod at once.
+        services.AddHealthChecks()
+            .AddCheck<LivenessHealthCheck>("cadence-live", tags: ["live"])
+            .AddCheck<ReadinessHealthCheck>("cadence-ready", tags: ["ready"]);
+
         var descriptors = builder.Jobs.ToList();
         services.AddSingleton<IJobRegistry>(_ => new JobRegistry(descriptors));
         services.AddSingleton(new RegistrationDiagnostics(builder.Warnings));

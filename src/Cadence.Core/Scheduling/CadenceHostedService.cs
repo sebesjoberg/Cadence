@@ -30,6 +30,7 @@ internal sealed class CadenceHostedService : BackgroundService
     private readonly LastSuccessCache _lastSuccess;
     private readonly ISystemClock _clock;
     private readonly CadenceMetrics _metrics;
+    private readonly CadenceReadiness _readiness;
     private readonly CadenceOptions _options;
     private readonly ILogger<CadenceHostedService> _logger;
 
@@ -45,6 +46,7 @@ internal sealed class CadenceHostedService : BackgroundService
         LastSuccessCache lastSuccess,
         ISystemClock clock,
         CadenceMetrics metrics,
+        CadenceReadiness readiness,
         IOptions<CadenceOptions> options,
         ILogger<CadenceHostedService> logger)
     {
@@ -57,6 +59,7 @@ internal sealed class CadenceHostedService : BackgroundService
         _lastSuccess = lastSuccess;
         _clock = clock;
         _metrics = metrics;
+        _readiness = readiness;
         _options = options.Value;
         _logger = logger;
     }
@@ -89,6 +92,10 @@ internal sealed class CadenceHostedService : BackgroundService
             });
 
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
+
+        // Last, so a probe never reports ready before validation and the change-token
+        // registration have both completed.
+        _readiness.MarkReady();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
