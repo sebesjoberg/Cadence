@@ -49,6 +49,12 @@ internal static partial class Log
     [LoggerMessage(EventId = 1005, Level = LogLevel.Information, Message = "Cadence stopped on instance {InstanceId}.")]
     public static partial void SchedulerStopped(this ILogger logger, string instanceId);
 
+    [LoggerMessage(
+        EventId = 1006,
+        Level = LogLevel.Warning,
+        Message = "Shutdown budget: {Problem}")]
+    public static partial void ShutdownBudgetTooShort(this ILogger logger, string problem);
+
     // 1100-1199: configuration.
 
     [LoggerMessage(

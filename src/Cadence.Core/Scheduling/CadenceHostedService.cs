@@ -26,6 +26,7 @@ internal sealed class CadenceHostedService : BackgroundService
     private readonly IScheduleSource _scheduleSource;
     private readonly JobExecutor _executor;
     private readonly JobGraphValidator _validator;
+    private readonly ShutdownBudgetProbe _shutdownBudget;
     private readonly LastSuccessCache _lastSuccess;
     private readonly ISystemClock _clock;
     private readonly CadenceMetrics _metrics;
@@ -40,6 +41,7 @@ internal sealed class CadenceHostedService : BackgroundService
         IScheduleSource scheduleSource,
         JobExecutor executor,
         JobGraphValidator validator,
+        ShutdownBudgetProbe shutdownBudget,
         LastSuccessCache lastSuccess,
         ISystemClock clock,
         CadenceMetrics metrics,
@@ -51,6 +53,7 @@ internal sealed class CadenceHostedService : BackgroundService
         _scheduleSource = scheduleSource;
         _executor = executor;
         _validator = validator;
+        _shutdownBudget = shutdownBudget;
         _lastSuccess = lastSuccess;
         _clock = clock;
         _metrics = metrics;
@@ -65,6 +68,10 @@ internal sealed class CadenceHostedService : BackgroundService
         // Before anything is scheduled, and on the startup path so a failure stops the host
         // deterministically rather than surfacing as a dead background service.
         _ticker.DisableJobs(await _validator.ValidateAsync(cancellationToken).ConfigureAwait(false));
+
+        // Advice, not a gate: the outermost timeout in the chain belongs to whatever supervises the
+        // process, so this can warn but never refuse to start.
+        _shutdownBudget.Report();
 
         foreach (var descriptor in _registry.All)
         {
