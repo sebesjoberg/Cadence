@@ -117,8 +117,8 @@ is not evidence of success.
 |---|---|---|
 | `AddCadence()` | cron in code, in-memory history, single instance, OTel | nothing |
 | `+ UseSqlStorage()` | persistence **and** clustering | a database |
-| `+ MapCadenceApi()` | trigger / status / schedule endpoints | an auth policy |
-| `+ EnableDashboard()` | UI, schedule editing | an auth policy |
+| `+ MapCadenceApi()` | trigger, reads, pause | a token, or an auth policy |
+| `+ MapCadenceDashboard()` | UI, schedule editing, manual trigger | a signed-in operator |
 | `+ AddAlerting()` | rules, watchdog, throttling | channel config |
 
 `UseSqlStorage()` alone is the documented "make it real" step — it brings the
@@ -141,8 +141,11 @@ message body → one recovery notification.
   tick. If it cannot be constructed, the process dies at deploy time instead of at
   02:00.
 - **At the edge:** `MapCadenceApi()` / `MapCadenceDashboard()` refuse to map outside
-  Development when no authorization metadata is attached. Shipping a package that can
-  silently expose "run any registered job" to the internet is not acceptable.
+  Development when nothing authenticates them. Shipping a package that can silently
+  expose "run any registered job" to the internet is not acceptable. §13.3 has the
+  full gate; the shape of it is that the refusal happens at *map* time, during startup
+  and before the server listens, so a missing token fails the deploy rather than the
+  night.
 
 Be honest in the README about what *cannot* be checked: a Roslyn analyzer cannot
 validate a DI graph, because registrations happen through arbitrary runtime code. The
@@ -159,8 +162,9 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain |
 | **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*, with the Aspire host demonstrating it between real processes |
 | — | **decision point** | *resolved — see below* |
-| v0.3 | Control surface | API, the auth gate, distributed pause — *pause has landed; the writable schedule source and change tokens landed early, in v0.2* |
-| v0.4 | Dashboard | overview, detail, schedule editing, manual trigger |
+| v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause — *pause has landed; the writable schedule source and change tokens landed early, in v0.2*. §13 is the design |
+| v0.3.1 | Identity | `ICredentialStore` on both tiers, its conformance suite, login and sessions, API-token creation and revocation — §13.5 |
+| v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
 
@@ -196,7 +200,7 @@ here; what it did move was the janitor, and §11.2 records why.
 | 3 | Payload JSON Schema | **No.** Leave payloads opaque; the job validates. Saves a dependency and a UI surface. |
 | 4 | Retry within run vs. reschedule | **Cut `MaxAttempts` from v1.** In-run retry makes duration and timeout ambiguous in history. Later, do it as a new run with `Trigger = Retry` and `ScheduledForUtc = null`, which sidesteps claim uniqueness entirely. |
 | 5 | Distributed pause | **Yes, v1 — done, as two switches rather than one.** See §12. |
-| 6 | Merge Api + Dashboard | **Merge the auth surface, keep the packages.** One `MapCadence()`, one policy, one options object; Dashboard depends on Api. Halves what has to be documented and secured. |
+| 6 | Merge Api + Dashboard | **Revised in v0.3: one options object, but two map calls.** The original answer was one `MapCadence()`. Building it found two audiences with two authentication mechanisms — a token for machines, a session for people — and one requirement that settles it: the callable API has to be switchable off. With one tree, "off" leaves every route mounted and answering to a session; with two it means not calling `MapCadenceApi()`, so the routes do not exist and a leaked token has nothing to reach. What survives of #6 is the part that mattered: one `CadenceApiOptions`, one gate, one thing to document and secure. See §13.1. |
 
 ---
 
@@ -216,6 +220,10 @@ here; what it did move was the janitor, and §11.2 records why.
 3. **Schedule store unavailable — boot versus tick.** Undefined today. Recommendation:
    never fail boot on a store blip. Start from code defaults, report degraded health,
    raise an alert. A database hiccup must not stop the whole application from starting.
+   *"Report degraded health" gets a mechanism in v0.3 — §13.4 — and one constraint that
+   was not obvious when this was written: the degraded signal must not reach the
+   orchestrator. Every replica shares one store, so a probe that fails on a store blip
+   fails on all of them at once.*
 
 4. **IANA timezone ids need ICU.** `InvariantGlobalization=true` — common in slim
    containers — breaks `FindSystemTimeZoneById` for IANA ids. Detect at boot and fail
@@ -316,6 +324,16 @@ decision rather than a ride on a sample's branch. Two things to weigh when it co
 even distribution is a property worth *promising* once it has been observed, and whether jitter makes
 the tick's relationship to `ScheduledForUtc` harder to reason about than the current fixed phase.
 
+Designing v0.3's deployment story raised the stakes on the finding without settling the fix. Under
+an orchestrator this stops being a curiosity about sample output: a horizontal autoscaler pointed
+at CPU adds replicas that win nothing, so the cluster scales while the throughput does not, and the
+only thing that currently redistributes work is a rolling deploy reshuffling which pod started
+first — §14.3.
+
+It also turned up a better answer than jitter, which is why neither has been taken: if instances
+pull work from a queue instead of executing what they claimed, tick phase stops deciding who works
+and jitter buys nothing. That is §14.1, and §14.2 records why the cheaper fix is waiting on it.
+
 ---
 
 ## 10. The end-to-end samples
@@ -326,10 +344,10 @@ the tick's relationship to `ScheduledForUtc` harder to reason about than the cur
 
 It proves the telemetry fan-out end to end: MEL console output, OTel log records
 carrying `JobName`/`RunId`/`InstanceId` as scope attributes, a `cadence.job` span with
-the §14 tags and a `cadence.job.progress` event, and the metrics including
+the spec's §14 tags and a `cadence.job.progress` event, and the metrics including
 `seconds_since_success`.
 
-### The Aspire version: built, with one blocker still standing
+### The Aspire version: built, and v0.3 clears the last blocker
 
 `samples/Cadence.Sample.AppHost` now runs three replicas against one SQL Server. What it
 measured is §9.4. It was blocked on two things:
@@ -337,7 +355,7 @@ measured is §9.4. It was blocked on two things:
 | Blocker | Milestone | Status |
 |---|---|---|
 | `Cadence.Storage.Sql` | v0.2 | **Cleared.** Without the unique-index claim, two replicas both run every occurrence, so the sample would have demonstrated the bug rather than the guarantee |
-| `Cadence.Dashboard` | v0.4 | Standing. The history sink has no reader, so the sample reads history from Aspire's own dashboard — which shows OTel, not `CadenceJobRun` |
+| `Cadence.Dashboard` | v0.4 | **Cleared early, by v0.3.** The blocker was never the UI, it was that the history sink had no reader, so the sample fell back to Aspire's own dashboard — which shows OTel, not `CadenceJobRun`. `GET /cadence/api/runs` is a reader, and it arrives a milestone before the dashboard does |
 
 **The first of the two consequences recorded here was wrong, and the correction matters.**
 It read: *"The Aspire host is where clustering gets proven — N replicas, one run per
@@ -444,3 +462,294 @@ later; the tick loop runs every second and cannot. The asymmetry is deliberate.
 false for that tier and the cross-instance test skips rather than being quietly dropped. The
 alternative, letting two in-memory stores share static state to make the test pass, would have made
 the suite lie about the tier it was hardest to be honest about.
+
+---
+
+## 13. The control surface
+
+v0.3 is the first package that is not a storage tier, and the first to reference ASP.NET Core.
+Core stays on the `Extensions.*` abstractions.
+
+### 13.1 Two trees, one options object
+
+`MapCadenceApi()` mounts the machine-callable tree and authenticates it with a token.
+`MapCadenceDashboard()` mounts the UI and the endpoints it needs, and authenticates those with an
+operator session. §7 #6 asked for a single `MapCadence()`; two audiences with two authentication
+mechanisms did not survive it, and one requirement decided it — the callable API has to be
+switchable off. On one tree "off" is a flag that leaves every route mounted and answering to a
+session. On two it is the absence of a line of code, so the routes do not exist and a leaked token
+has nothing to reach.
+
+What §7 #6 was actually protecting still holds: one `CadenceApiOptions`, one gate, one thing to
+secure. The dashboard adds fields to that object in v0.4 rather than introducing a second one.
+
+Registration follows the storage tiers, because `CadenceBuilder.Services` was made public for
+exactly this:
+
+```csharp
+builder.Services.AddCadence(cadence => cadence
+    .UseSqlStorage(connectionString)
+    .AddApi(api => api.BasePath = "/cadence"));
+
+app.MapCadenceApi();          // v0.3
+// app.MapCadenceDashboard(); // v0.4
+```
+
+### 13.2 The surface, and the one write that is not on it
+
+```
+POST /cadence/api/jobs/{name}/trigger    202  { runId, jobName, instanceId }
+GET  /cadence/api/jobs                   200  [ job summary ]
+GET  /cadence/api/jobs/{name}            200  job detail + recent runs
+GET  /cadence/api/runs?job=&status=&from=&to=&instance=&limit=&offset=
+GET  /cadence/api/runs/{id}              200  run detail incl. log
+GET  /cadence/api/pause                  200  { scope, reason, setBy, setAtUtc }
+PUT  /cadence/api/pause                  204
+```
+
+§4 originally promised "trigger / status / schedule endpoints". **Schedule writes are not here.**
+The two writes are not equivalent: a triggered run is loud, appears in history, and is over. A
+changed cron expression is silent and permanent, and nobody notices it until the night it does not
+run. So a token can start work and stop work, and only a person can change when work happens.
+
+Pause is on it deliberately, and it is the one write that earns its place: an alert that halts
+scheduled work and pages a human is a real runbook, it is reversible, and §12 already scoped it.
+
+Status codes fall out of exceptions that already exist, as RFC 9457 `ProblemDetails`:
+
+| Outcome | Status | Source |
+|---|---|---|
+| run started | 202 | `DispatchResult.Started` — `TriggerAsync` returns before the job finishes |
+| overlap policy refused | 409 | `DispatchResult.Skipped`, carrying `SkipReason` |
+| triggers paused | 409 | `SchedulerPausedException`, with who paused it and why |
+| job not registered here | 404 | `JobNotFoundException` |
+| trigger kind not allowed | 400 | `TriggerNotAllowedException`, listing what the job does allow |
+
+`DispatchResult.Skipped` is the row to watch. It is not an error, and it is not success, and the
+easy mistake is to answer 200 with an empty body — which tells a caller that a run started when
+none did. Three further choices:
+
+- **The endpoint passes `TriggerKind.Api`, not `Manual`**, so history separates "someone clicked"
+  from "something called us". `JobTrigger` already refuses `Schedule` on its own.
+- **`limit` is capped at 500** whatever is asked for. `RunQuery.Limit` has no ceiling of its own,
+  which makes an unbounded `limit` a one-request denial against the history store.
+- **Responses are explicit records behind a source-generated `JsonSerializerContext`.** Serialising
+  `JobRun` directly would make every future storage column a public API change.
+
+### 13.3 The gate
+
+One authentication scheme, `CadenceToken`, reading `Authorization: Bearer`. Comparison hashes both
+sides with SHA-256 before `CryptographicOperations.FixedTimeEquals`, so the compare is
+fixed-length and token length does not leak.
+
+Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
+
+| Condition | Result |
+|---|---|
+| `options.RequireAuthorization("policy")` | maps; the host's policy governs |
+| one or more tokens configured | maps; built-in policy requires an authenticated `CadenceToken` |
+| `options.AllowUnauthenticated = true` | maps, warning logged **every start** |
+| none of those, `IsDevelopment()` | maps, loud warning |
+| none of those, anything else | **throws**, naming all three remedies |
+
+The composition rule is one sentence: **a named policy governs alone, and the token scheme
+authenticates into it.** Token auth produces a principal carrying a `cadence:token` claim and the
+host's policy decides whether that is sufficient, so an app with OIDC can accept both by writing
+one policy. No OR-policy machinery.
+
+`AllowUnauthenticated` exists for an authenticating proxy or an mTLS mesh, and because without it
+people reach for something worse — an anonymous wrapper, or a second port with no gate on it. One
+named, logged, reviewable flag is the better failure.
+
+**HTTPS is documented, not enforced.** A bearer token over plaintext is a leaked token, but TLS
+terminates at the ingress in every real deployment, so an app-level requirement would break the
+standard topology. Trying to detect whether something upstream terminated TLS guesses wrong in
+both directions, so we do not guess.
+
+Tokens come from configuration, and also from `CADENCE_API_TOKEN` (comma-separated) because
+`Cadence__Api__Tokens__0=` is miserable in a compose file. Two sources is two places to look when
+it does not work, so boot logs which source supplied them and how many.
+
+### 13.4 Health, and why the probes must not know about storage
+
+| Check | Tag | Registered by |
+|---|---|---|
+| `cadence-live` | `live` | `AddCadence()` — the process is up |
+| `cadence-ready` | `ready` | `AddCadence()` — boot probe passed, jobs registered |
+| `cadence-sql` | `cadence.storage` | `UseSqlStorage()` — `SELECT 1` |
+| `cadence-redis` | `cadence.storage` | `UseRedisStorage()` — `PING` |
+
+**The liveness and readiness checks are given no store to query.** That is the enforcement, not a
+convention: they cannot fail on a store blip because they cannot see one. Every replica shares one
+store, so a readiness probe that is honest about it takes every pod out of the service
+simultaneously — and the dashboard returns 503 during precisely the incident someone opened it to
+investigate, while the rolling deploy that would have fixed it stalls. The strict version is worse
+still: liveness tied to the store turns a database hiccup into a cluster-wide crash loop, each
+restart re-running the migrator against the store that is already struggling.
+
+Storage health is therefore reported to humans, alerting and the dashboard, never to the kubelet,
+and it reports `Degraded` rather than `Unhealthy`. This is where §8 gap #3's "report degraded
+health" lands.
+
+Storage checks are registered by the storage packages as ordinary `IHealthCheck`s, which needs no
+new Cadence seam. `MapCadenceHealth()` is a convenience with configurable paths; the tags are
+documented so an app that already maps `/health` composes its own. The access split is
+load-bearing:
+
+- `/health/live`, `/health/ready` — **anonymous**. The kubelet cannot present a token.
+- `/cadence/api/health/storage` — **behind the gate**. It returns the last store error.
+
+### 13.5 Identity, and the tier that has no store
+
+v0.3.1. The shape is already set by §8 gap #5: `ICredentialStore` and `IWritableCredentialStore`,
+because "turn off creation of users and tokens" should not be a flag that can be misconfigured. It
+is the in-memory tier not implementing the writable half.
+
+| | No storage package | `UseSqlStorage()` / `UseRedisStorage()` |
+|---|---|---|
+| Admin | one, from the environment | persisted; the environment admin bootstraps first boot |
+| API tokens | from the environment, read-only | created, listed and revoked at runtime |
+| Creation endpoints | not mounted | mounted |
+
+**A session should be an opaque token in that same store, not a JWT.** The dashboard is a browser
+client, so a JWT lives either in `localStorage`, where any XSS reads it, or in a cookie — and once
+it is in a cookie it has bought nothing, while still costing a signing key that must reach every
+replica identically and revocation that does not work, because an issued JWT cannot be withdrawn.
+The store that API tokens need already exists by then; a session is another row in it. Logout
+logs out, and there is no key to distribute.
+
+Three consequences of N replicas each serving the dashboard, because the rule is that nothing
+which matters may live in process memory:
+
+1. **Sessions must be store-backed**, which is the argument above arriving from a second
+   direction. Sign in on one replica, get routed to another, stay signed in — with no sticky
+   sessions to configure.
+2. **Revocation has to invalidate caches.** A replica that caches credentials keeps honouring a
+   token revoked elsewhere until its cache expires — a silent window in which a withdrawn token
+   still starts jobs. §11.3's change token and pub-sub already solve exactly this for schedule
+   edits: polled on SQL, pushed on Redis, poll kept as the backstop. Reuse it rather than
+   inventing a second mechanism.
+3. **Login rate limiting has to be shared.** Per-process counters give an attacker rotating
+   across replicas N times the attempt budget, and each replica's log looks unremarkable.
+   Store-backed counters, or documented as the ingress's job — but not left implicit.
+
+### 13.6 The topology the trigger forces
+
+`IJobTrigger.TriggerAsync` ends in `JobExecutor.DispatchAsync`, so **a triggered run executes in
+the process that received the request.** Two consequences, and the second is the one worth
+documenting before someone deploys it:
+
+1. Behind a load balancer, a manual run's `InstanceId` is chosen by the ingress, not by Cadence.
+   Reads, schedule edits and pause are all correct from any replica, because they go to the shared
+   store.
+2. **A dashboard-only deployment that registers no jobs cannot trigger anything** — the registry is
+   empty, so every trigger is a `JobNotFoundException`. Making it work needs cross-process
+   dispatch, which is a queue, which §7 #1 and #4 cut on purpose.
+
+So the supported shape is every replica mapping the API. `MapCadenceApi()` does **not** throw on an
+empty registry — registering jobs behind a feature flag is legitimate, and a hard failure would
+break it. Instead it warns at map time, and the trigger endpoint's 404 names the cause: *no job
+named 'x' is registered in this instance (0 jobs registered)*. A misconfigured pod then diagnoses
+itself from one response body.
+
+---
+
+## 14. Parked — written down, deliberately not built
+
+Everything in this section is a decision recorded so it does not have to be re-derived, and so
+nobody mistakes it for something the package does. None of it is scheduled. It is here because
+half-designed futures interleaved with settled ones are what make a design hard to reason about,
+and the fix is to say which is which.
+
+### 14.1 Queue the claim, pull the work
+
+§9.4 measured that occurrence claiming elects a leader rather than spreading load. This is the
+architecture that would actually fix it, and the reason it is recorded rather than built is that it
+changes semantics, not that it is hard.
+
+**Split claiming from executing.** Every instance keeps ticking and racing to claim, exactly as
+now — the unique index already makes concurrent claims safe. The winner writes a `Pending` run
+instead of executing one. Then every instance, winner or not, pulls from that queue when it has
+capacity. Load spreads because idle instances pull.
+
+**There is no queue to install, because the claim already is one.** §3.2's "the claim is the run
+row" turns out to also mean the claim is the work item:
+
+```sql
+UPDATE TOP (1) CadenceJobRun WITH (READPAST, UPDLOCK, ROWLOCK)
+   SET InstanceId = @me, Status = 'Running', StartedAt = SYSUTCDATETIME()
+OUTPUT inserted.*
+ WHERE Status = 'Pending';
+```
+
+`READPAST` is what makes that safe for N instances at once: a puller skips rows another instance
+has locked rather than blocking on them, and the `UPDATE … OUTPUT` is atomic, so ten instances
+against one database each get a different row and none gets the same row twice. Redis has the same
+shape with `BLMOVE` into a per-worker processing list. No broker, no new table, no new
+infrastructure — the shared store is the coordination, exactly as it is today.
+
+**And no leader.** A leader container dispatching to subcontainers is the obvious framing and the
+wrong one: election needs leases, leases need fencing, and that is precisely the
+distributed-systems project §3.1 refused to become. Because concurrent claims are already safe,
+nothing needs electing.
+
+What the migration costs, which is the point of writing it down:
+
+| Piece | Fate |
+|---|---|
+| `IOccurrenceCoordinator`, `UX_CadenceJobRun_Occurrence` | **Kept verbatim.** Still answers "has this slot been taken", now gating an enqueue |
+| `JobExecutor`, per-run scope, dual cancellation, history writes | **Unchanged.** A puller runs the identical path |
+| Both tiers' run tables and keys | **Unchanged.** The queue is the rows already there |
+| `ScheduleTicker` | Claim → enqueue, instead of claim → dispatch |
+| The pull loop | **New.** The only genuinely new component |
+| `IJobTrigger` | Enqueues instead of dispatching in-process — which dissolves §13.6 |
+| An instance dying mid-item | The janitor already reaps runs whose heartbeat timed out; returning them to `Pending` rather than marking `Lost` is a policy change inside the component §11.2 moved into Core |
+
+One new component and two rewired call sites, over seams that stay put. **The current design is a
+stepping stone to this, not an obstacle** — the coordinator seam §11.2 proved holds is exactly what
+makes it cheap, and a version of Cadence that had skipped coordination to stay simple would have a
+harder migration, not an easier one.
+
+Why not now: `InstanceId` stops meaning "where it was claimed", visibility timeouts appear,
+`MaxCatchUp` needs re-examining against a queue that can back up, and history gains a `Pending`
+state that every reader has to understand. Semantics to think about, not code to type.
+
+### 14.2 Tick jitter
+
+The small fix for §9.4 — jitter each instance's tick phase by a random fraction of `TickInterval`
+so wins spread across instances without touching the claim. Still not taken, and §14.1 is the
+reason it may never be: if pulling replaces dispatching, tick phase stops deciding who works and
+jitter buys nothing. Taking jitter first would be spending a change to a load-bearing path on a
+problem the better answer removes.
+
+### 14.3 Deployment under an orchestrator
+
+None of this is documented for users yet, and should not be until someone has actually deployed it.
+
+**There is nothing to configure.** A plain `Deployment` with `replicas: 3` — no StatefulSet, no
+leader-election sidecar, no pod affinity, no ordinal identity. That is §3.1 paying out rather than
+luck: the claim is a row in the store, so nothing is tied to a pod's name or lifetime. `InstanceId`
+needs no work either, since the default `{machine}:{pid}:{short-guid}` already resolves `machine`
+to the pod name.
+
+**The autoscaler does nothing.** Given §9.4, a horizontal autoscaler pointed at CPU adds replicas
+that win nothing: the cluster scales and the throughput does not, and the only thing that currently
+redistributes work is a rolling deploy changing which pod started first. Until §14.1 or §14.2,
+replica count is failover capacity, and the README says so next to the guarantee.
+
+**Three timeouts that all default to thirty seconds.** `terminationGracePeriodSeconds`,
+`HostOptions.ShutdownTimeout` and `CadenceOptions.ShutdownDrainTimeout`. A job with a ten-minute
+`MaxDuration` therefore gets SIGTERM, thirty seconds, and SIGKILL — the run dies mid-flight and the
+janitor marks it `Lost` a heartbeat timeout later, which reads in history as an infrastructure
+failure rather than the misconfiguration it is. The invariant is `terminationGracePeriodSeconds ≥
+ShutdownTimeout ≥ ShutdownDrainTimeout ≥ the longest MaxDuration`, and nothing checks it. Two of
+the three are outside the process, so only the inner pair can be validated; that much is a boot
+probe in the §5 spirit, and the outer one is deployment documentation.
+
+### 14.4 The compose proof
+
+Aspire demonstrates multi-replica scheduling but supervises it, which is what makes it a
+demonstration rather than a deployment. A docker-compose PoC — real containers, one SQL Server, N
+workers behind a load balancer — is where §14.3 could be shown to someone rather than asserted:
+kill the leader and watch the next claim move, shorten the grace period and watch a run land as
+`Lost`.

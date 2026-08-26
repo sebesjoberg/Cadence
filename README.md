@@ -47,6 +47,20 @@ rely on it: `OverlapPolicy.Skip` is strict within an instance and best-effort ac
 cluster. If a long run is in flight on instance A and instance B claims the next
 occurrence, B runs it.
 
+### Replicas are failover, not load spreading
+
+Claiming an occurrence is a race to a write, and every instance ticks on its own timer whose
+phase is fixed by when the process started. The instance that starts earliest therefore wins
+every race, and keeps winning until it stops — measured at three replicas against one SQL
+Server, where the replica that started 40 ms ahead won **every** occurrence and the other two
+won none.
+
+Nothing is broken by that; one instance running each occurrence is exactly the guarantee. But
+three replicas do not divide the work three ways, so do not size a cluster as though they do.
+They are failover capacity that happens to be warm, and failover itself is immediate: kill the
+leader mid-run and the next occurrence is claimed by the next-earliest instance, with the
+interrupted run marked `Lost` once its heartbeat times out.
+
 ## Pausing
 
 Two switches, held in the storage tier and read by every instance:
@@ -72,8 +86,8 @@ With no storage package the switches live in the process, which is all there is 
 |---|---|---|
 | `AddCadence()` | cron in code, in-memory history, single instance, OTel | nothing |
 | `+ UseSqlStorage()` *or* `UseRedisStorage()` | persistence **and** clustering | a database, or a Redis |
-| `+ MapCadenceApi()` | trigger / status / schedule endpoints | an auth policy |
-| `+ EnableDashboard()` | UI, schedule editing | an auth policy |
+| `+ MapCadenceApi()` | trigger, reads, pause | a token, or an auth policy |
+| `+ MapCadenceDashboard()` | UI, schedule editing, manual trigger | a signed-in operator |
 | `+ AddAlerting()` | rules, watchdog, throttling | channel config |
 
 Persistence and clustering arrive together on purpose. Splitting them would let you
@@ -133,8 +147,10 @@ than answering it.
 **Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is complete,
 with both tiers held to one conformance suite that runs against a real server in CI, and the Aspire
 multi-replica sample demonstrates it between real processes. v0.3, the control surface, is under
-way: distributed pause has landed, and the HTTP API and its auth gate follow. Not yet published to
-NuGet.
+way: distributed pause has landed, and the machine-callable API, its auth gate and the health
+checks are designed but not yet built — see §13 of the design plan. Sign-in, sessions and
+dashboard-created API tokens follow in v0.3.1, and the dashboard itself in v0.4. Not yet published
+to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 
