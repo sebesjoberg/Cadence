@@ -175,6 +175,19 @@ public sealed class TokenAuthenticationTests
         Assert.Contains(CadenceApiDefaults.AuthenticationScheme, policy.AuthenticationSchemes);
     }
 
+    // The symptom half of the finding above: a policy naming a scheme that is not registered throws
+    // when it is evaluated, which would be a 500 on every request in exactly the deployments that
+    // configure no token. Only a mapped route can show that, and now there is one.
+    [Fact]
+    public async Task WithNoTokenConfiguredAMappedRouteStillAnswers()
+    {
+        await using var host = await ApiTestHost.StartAsync(environment: Environments.Development);
+
+        var response = await host.Client.GetAsync(PausePath);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     [Fact]
     public async Task BootLogsTheSourceAndCountButNeverTheToken()
     {

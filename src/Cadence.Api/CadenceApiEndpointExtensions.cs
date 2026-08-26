@@ -91,6 +91,7 @@ public static class CadenceApiEndpointExtensions
         // OpenAPI surface today; whoever adds AddOpenApi() will need .Produces<T>() alongside it.
         JobEndpoints.Map(group);
         RunEndpoints.Map(group);
+        PauseEndpoints.Map(group);
 
         return group;
     }

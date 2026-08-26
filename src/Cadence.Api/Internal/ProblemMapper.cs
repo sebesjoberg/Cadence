@@ -43,6 +43,14 @@ internal static class ProblemMapper
         "Job not found",
         $"No job is registered under the name '{jobName}'.");
 
+    /// <summary>Describes a pause scope that names no combination of the defined flags.</summary>
+    /// <param name="scope">The scope as the caller wrote it.</param>
+    public static ProblemDetails InvalidPauseScope(string? scope) => Problem(
+        400,
+        "invalid-pause-scope",
+        "Unknown pause scope",
+        $"'{scope}' is not a pause scope. Use None, Schedule, Triggers or All.");
+
     /// <summary>Describes a run that no longer exists, or never did.</summary>
     /// <param name="runId">The id that matched nothing.</param>
     public static ProblemDetails RunNotFound(Guid runId) => Problem(
