@@ -17,6 +17,7 @@ public static class CadenceHealthEndpointExtensions
     /// <param name="livePath">Where liveness answers.</param>
     /// <param name="readyPath">Where readiness answers.</param>
     /// <returns>The route builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">A path is blank, or both paths are the same.</exception>
     /// <remarks>
     /// <para>
     /// Anonymous because the kubelet cannot present a token. Storage health is not here: it is mapped
@@ -37,6 +38,16 @@ public static class CadenceHealthEndpointExtensions
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentException.ThrowIfNullOrWhiteSpace(livePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(readyPath);
+
+        // Two GET endpoints on one route is an AmbiguousMatchException at request time -- on a probe
+        // path, in production, long after the deploy that caused it.
+        if (string.Equals(livePath, readyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"Liveness and readiness cannot share the path '{livePath}'. They answer different " +
+                "questions, and mapping both on one route matches neither.",
+                nameof(readyPath));
+        }
 
         endpoints.MapHealthChecks(livePath, new HealthCheckOptions
         {

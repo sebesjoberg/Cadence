@@ -18,6 +18,12 @@ namespace Cadence.Storage.Redis;
 /// Registered under the name <c>cadence-redis</c> and the tag <c>cadence.storage</c> by
 /// <see cref="CadenceRedisStorageExtensions.UseRedisStorage"/>.
 /// </para>
+/// <para>
+/// Cancellation reaches the ping and nothing before it. Connecting has no token to take, so the
+/// first probe against a Redis that accepts nothing blocks for the driver's <c>connectTimeout</c>
+/// however promptly the caller cancels, and probes arriving meanwhile queue behind the connect gate.
+/// Bounded by that timeout rather than unbounded, which is what makes it acceptable here.
+/// </para>
 /// </remarks>
 internal sealed class RedisStorageHealthCheck : IHealthCheck
 {
@@ -38,7 +44,9 @@ internal sealed class RedisStorageHealthCheck : IHealthCheck
         {
             var database = await _connection.GetDatabaseAsync().ConfigureAwait(false);
 
-            // PingAsync takes no token, so the wait is what the check's timeout acts on.
+            // PingAsync takes no token, so the wait is the only place cancellation can be honoured
+            // -- and it abandons the ping rather than stopping it. See the remarks for what that
+            // leaves uncovered.
             var latency = await database.PingAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
 
             return HealthCheckResult.Healthy($"Redis answered in {latency.TotalMilliseconds:F0} ms.");

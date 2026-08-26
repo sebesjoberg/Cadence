@@ -1,4 +1,5 @@
 using Cadence.Storage.Sql.Internal;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -51,7 +52,11 @@ public sealed class SqlStorageHealthCheckTests
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
         Assert.NotEqual(HealthStatus.Unhealthy, result.Status);
-        Assert.NotNull(result.Exception);
+
+        // The exception type, not merely that there was one: an argument exception thrown before the
+        // socket was touched would satisfy NotNull identically, and the only tests that prove the
+        // query reaches a server are the two this machine skips.
+        Assert.IsType<SqlException>(result.Exception);
     }
 
     [Fact]

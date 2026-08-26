@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Xunit;
@@ -50,8 +52,10 @@ public sealed class HealthEndpointTests
     [Fact]
     public async Task ADownStoreLeavesTheKubeletProbesGreen()
     {
-        // The whole point of the split, exercised end to end rather than argued in a comment: a
-        // storage check that is failing must change nothing the kubelet reads.
+        // Asserted on the body, and not only on the status. HealthCheckOptions maps Degraded to 200
+        // just as it maps Healthy, so a status-only assertion here holds even with the tag predicates
+        // deleted -- it would pass while proving nothing. The minimal plaintext writer emits the
+        // report's own status, which is precisely what a leaked storage check changes.
         await using var host = await StartAsync(WithFailingStore);
 
         var live = await host.Client.GetAsync("/health/live");
@@ -59,6 +63,41 @@ public sealed class HealthEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, live.StatusCode);
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+        Assert.Equal(nameof(HealthStatus.Healthy), await live.Content.ReadAsStringAsync());
+        Assert.Equal(nameof(HealthStatus.Healthy), await ready.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task TheProbesStayAnonymousUnderAHostFallbackPolicy()
+    {
+        // The one thing AllowAnonymous() defends against, and the only configuration in which it is
+        // observable: a fallback policy applies to every endpoint carrying no authorization metadata
+        // of its own, so without those two calls the kubelet gets 401 from a host that sets one.
+        await using var host = await StartAsync(services => services.Configure<AuthorizationOptions>(
+            authorization => authorization.FallbackPolicy =
+                new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()));
+
+        var live = await host.Client.GetAsync("/health/live");
+        var ready = await host.Client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+    }
+
+    [Fact]
+    public void TheTwoProbePathsCannotBeTheSame()
+    {
+        // Mapping both on one route is two GET endpoints on one pattern, which matches neither: an
+        // AmbiguousMatchException on the probe path at request time. Refused at map time instead.
+        var builder = WebApplication.CreateSlimBuilder();
+
+        // Registered so the health-check services exist: without them MapHealthChecks throws on its
+        // own, and the assertion would pass on an exception the guard never raised.
+        builder.Services.AddCadence();
+
+        using var app = builder.Build();
+
+        Assert.Throws<ArgumentException>(() => app.MapCadenceHealth("/health", "/health"));
     }
 
     [Fact]

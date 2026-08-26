@@ -2,6 +2,7 @@ using Cadence.Storage.Redis.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using Xunit;
 
 namespace Cadence.Storage.Redis.Tests;
@@ -51,7 +52,11 @@ public sealed class RedisStorageHealthCheckTests
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
         Assert.NotEqual(HealthStatus.Unhealthy, result.Status);
-        Assert.NotNull(result.Exception);
+
+        // The exception type, not merely that there was one: an argument exception thrown before the
+        // socket was touched would satisfy NotNull identically, and the only test that proves the
+        // ping reaches a server is the one this machine skips.
+        Assert.IsType<RedisConnectionException>(result.Exception);
     }
 
     [Fact]
