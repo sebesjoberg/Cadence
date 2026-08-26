@@ -129,6 +129,21 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
     }
 
     /// <inheritdoc />
+    public async Task<JobRun?> GetAsync(Guid runId, CancellationToken cancellationToken)
+    {
+        var database = await _connection.GetDatabaseAsync().ConfigureAwait(false);
+        var runs = await LoadAsync(database, [runId.ToString("N")], cancellationToken).ConfigureAwait(false);
+
+        if (runs.Count == 0)
+        {
+            return null;
+        }
+
+        var withLogs = await WithLogsAsync(database, runs, cancellationToken).ConfigureAwait(false);
+        return withLogs[0];
+    }
+
+    /// <inheritdoc />
     public async Task<JobRun?> GetLastRunAsync(string jobName, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobName);
@@ -216,7 +231,9 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
             .Take(query.Limit)
             .ToList();
 
-        return await WithLogsAsync(database, window, cancellationToken).ConfigureAwait(false);
+        return query.IncludeLog
+            ? await WithLogsAsync(database, window, cancellationToken).ConfigureAwait(false)
+            : window;
     }
 
     /// <inheritdoc />
