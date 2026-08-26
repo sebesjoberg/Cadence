@@ -85,10 +85,11 @@ public static class CadenceApiEndpointExtensions
             group.RequireAuthorization(CadenceTokenDefaults.Policy);
         }
 
-        // Every handler returns JsonHttpResult<T> so the responses go out through the package's own
-        // source-generated context. That type contributes no typed-200 metadata, so anything added
-        // to an OpenAPI document here would describe the statuses and not the schemas. There is no
-        // OpenAPI surface today; whoever adds AddOpenApi() will need .Produces<T>() alongside it.
+        // Every handler with a body returns JsonHttpResult<T>, so the responses go out through the
+        // package's own source-generated context. That type contributes no typed-200 metadata, so
+        // anything added to an OpenAPI document here would describe the statuses and not the
+        // schemas. There is no OpenAPI surface today; whoever adds AddOpenApi() will need
+        // .Produces<T>() alongside it.
         JobEndpoints.Map(group);
         RunEndpoints.Map(group);
         PauseEndpoints.Map(group);

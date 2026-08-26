@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Cadence.Api.Tests;
@@ -15,6 +16,10 @@ public sealed class PauseEndpointTests
 
     /// <summary>The first eight lowercase hex of SHA-256(Token), as the token handler names it.</summary>
     private const string Fingerprint = "bb60af61";
+
+    /// <summary>What the substituted clock stamps a pause with. Not UTC, which is the whole point.</summary>
+    private static readonly DateTimeOffset Stamp =
+        new(2026, 8, 26, 13, 0, 0, TimeSpan.FromHours(2));
 
     [Fact]
     public async Task PausingReturnsNoContentAndTakesEffect()
@@ -82,7 +87,11 @@ public sealed class PauseEndpointTests
     [Fact]
     public async Task ThePauseStateIsReadable()
     {
-        await using var host = await StartAsync();
+        // The clock is substituted so the store stamps an offset the response has to normalize away.
+        // Against the real clock UtcNow is always zero-offset, and the assertion below would hold
+        // whether or not anything normalized anything.
+        await using var host = await StartAsync(services =>
+            services.Replace(ServiceDescriptor.Singleton<ISystemClock>(new OffsetClock(Stamp))));
         await host.Services.GetRequiredService<IPauseStore>()
             .SetAsync(PauseScope.Triggers, "maintenance", "someone", default);
 
@@ -95,6 +104,23 @@ public sealed class PauseEndpointTests
         Assert.Equal("maintenance", state.Reason);
         Assert.Equal("someone", state.SetBy);
         Assert.Equal(TimeSpan.Zero, state.SetAtUtc!.Value.Offset);
+        Assert.Equal(Stamp.UtcDateTime, state.SetAtUtc.Value.DateTime);
+    }
+
+    // The write that halts scheduling across a cluster, probed directly rather than by way of the
+    // group it shares with the reads. The store assertion is what separates "refused before the
+    // handler" from "refused after the pause had already been written".
+    [Fact]
+    public async Task ThePauseWriteIsBehindThePolicy()
+    {
+        await using var host = await StartAsync();
+
+        var response = await host.Client.PutAsJsonAsync(
+            "/cadence/api/pause",
+            new PauseRequest(nameof(PauseScope.All), "no token"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(PauseScope.None, (await StateOf(host)).Scope);
     }
 
     [Fact]
@@ -168,6 +194,12 @@ public sealed class PauseEndpointTests
         return request;
     }
 
-    private static Task<ApiTestHost> StartAsync() =>
-        ApiTestHost.StartAsync(api => api.Tokens.Add(Token));
+    private static Task<ApiTestHost> StartAsync(Action<IServiceCollection>? services = null) =>
+        ApiTestHost.StartAsync(api => api.Tokens.Add(Token), services);
+
+    /// <summary>A clock whose instant carries an offset, so normalization has something to do.</summary>
+    private sealed class OffsetClock(DateTimeOffset now) : ISystemClock
+    {
+        public DateTimeOffset UtcNow => now;
+    }
 }
