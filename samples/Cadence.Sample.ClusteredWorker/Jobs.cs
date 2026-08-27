@@ -88,3 +88,36 @@ public sealed class SlowSweepJob(ILogger<SlowSweepJob> logger) : IJob
         logger.SweepFinished(context.InstanceId);
     }
 }
+
+/// <summary>
+/// Has no cron, so it runs only when something asks. That makes it the honest test of the trigger
+/// endpoint: <c>tick-tock</c> fires every five seconds anyway, so a triggered run is hard to pick
+/// out of the noise, while a run of this job can only have come from a request.
+/// </summary>
+/// <remarks>
+/// It is also the only job here whose <c>cron</c> and <c>timeZone</c> come back null from
+/// <c>GET /cadence/api/jobs</c> — the shape a trigger-only job has on the wire.
+/// </remarks>
+[ScheduledJob(
+    Name = "reindex-catalog",
+    Triggers = TriggerKind.Api | TriggerKind.Manual,
+    MaxDuration = "00:00:30")]
+public sealed class ReindexCatalogJob(ILogger<ReindexCatalogJob> logger) : IJob
+{
+    public async Task ExecuteAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        logger.ReindexStarting(context.InstanceId);
+
+        for (var batch = 1; batch <= 3; batch++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken);
+            context.Report($"reindexed batch {batch} of 3", new Dictionary<string, object?>
+            {
+                ["instance"] = context.InstanceId,
+                ["batch"] = batch,
+            });
+        }
+
+        logger.ReindexFinished(context.InstanceId);
+    }
+}

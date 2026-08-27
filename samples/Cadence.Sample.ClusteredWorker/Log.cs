@@ -34,4 +34,16 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Replica {Instance} joining the cluster against the shared Cadence database.")]
     public static partial void ReplicaStarting(this ILogger logger, string instance);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Information,
+        Message = "Reindex starting on {Instance}, by request rather than by schedule.")]
+    public static partial void ReindexStarting(this ILogger logger, string instance);
+
+    [LoggerMessage(
+        EventId = 6,
+        Level = LogLevel.Information,
+        Message = "Reindex finished on {Instance}.")]
+    public static partial void ReindexFinished(this ILogger logger, string instance);
 }
