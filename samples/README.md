@@ -6,7 +6,6 @@
 | `Cadence.Sample.ClusteredWorker` | The deployable shape: Core, the SQL tier and the control surface in **one** web host. Launched by the AppHost, not directly. |
 | `Cadence.Sample.AppHost` | Aspire, a SQL Server container, and three replicas of that host behind one proxied endpoint. |
 
-
 ## Cadence.Sample.Worker
 
 A worker host that runs one job, `hello-there`, every ten seconds. It greets a different name each
@@ -66,8 +65,8 @@ the AppHost is only what launches three of it.
 
 **Why not a worker tier and an API tier.** `IJobTrigger.TriggerAsync` ends in
 `JobExecutor.DispatchAsync`, so a triggered run executes in the process that received the request.
-There is no cross-process dispatch — that would be a queue, and §7 of the design plan cut queues on
-purpose. An API host over a different process's jobs therefore answers every trigger with
+There is no cross-process dispatch — that would be a queue, and §7 #1 and #4 of the design plan cut
+queues on purpose. An API host over a different process's jobs therefore answers every trigger with
 `urn:cadence:problem:job-not-found`, which is exactly what an earlier version of this sample did.
 Design plan §13.6 states the conclusion: *the supported shape is every replica mapping the API*.
 
@@ -322,18 +321,23 @@ Triggers stay open the whole time, because the two switches are independent:
 {"runId":"616b3bcc-141c-40e4-822f-945da20c5975","jobName":"tick-tock","instanceId":"worker-ehswtftx"}
 ```
 
-Close the other switch and the escape hatch shuts too — four triggers, spread by the proxy across
-all three replicas, all refused:
+Close the other switch and the escape hatch shuts too. Give it a poll interval, then four triggers
+through the same proxied endpoint:
 
 ```powershell
-curl.exe -s -i -X PUT -H "Authorization: Bearer $t" -H "Content-Type: application/json" `
-  -d '{"scope":"All","reason":"payment gateway incident"}' "$b/cadence/api/pause"
+curl.exe -s -o NUL -w "pause: %{http_code}`n" -X PUT -H "Authorization: Bearer $t" `
+  -H "Content-Type: application/json" -d '{"scope":"All","reason":"payment gateway incident"}' "$b/cadence/api/pause"
+Start-Sleep -Seconds 7
 1..4 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code} " -X POST -H "Authorization: Bearer $t" "$b/cadence/api/jobs/tick-tock/trigger" }
 ```
 
 ```
+pause: 204
 409 409 409 409
 ```
+
+Four in a row, on connections the proxy hands out across replicas: whichever ones answered had all
+seen the pause.
 
 ```json
 {"type":"urn:cadence:problem:scheduler-paused","title":"Triggers are paused","status":409,"detail":"'tick-tock' was not started because triggers are paused by token:247d08f3: payment gateway incident"}
@@ -402,8 +406,8 @@ HTTP/1.1 401 Unauthorized
 `/cadence/api/health/storage` is inside the group and behind the gate, because it reports the last
 store error — operator information, not a probe.
 
-Now take the database away (`docker stop` the `sql` container from the dashboard's resource list)
-and ask all three again:
+Now take the database away — `docker stop` the `sql` container, or stop the resource from the
+dashboard — and ask the same three routes:
 
 ```
 /health/live               200 Healthy
@@ -444,7 +448,7 @@ meeting the open endpoint. `--no-launch-profile` drops the `Development` the lau
 and `Production` does not load `appsettings.Development.json`, so no token is configured:
 
 ```powershell
-$env:ConnectionStrings__cadence = '<the AppHost's connection string>'
+$env:ConnectionStrings__cadence = 'Server=localhost,1;Database=cadence;User Id=sa;Password=nope'
 dotnet run --project samples/Cadence.Sample.ClusteredWorker --no-launch-profile -- --environment Production
 ```
 
@@ -457,10 +461,17 @@ CadenceApiOptions.AllowUnauthenticated.
    at Cadence.Api.CadenceApiEndpointExtensions.MapCadenceApi(IEndpointRouteBuilder endpoints)
 ```
 
-The process exits without ever listening, and it does so before the storage tier is even contacted —
-the connection string above only has to exist, not to work. Satisfy the gate with
-`$env:CADENCE_API_TOKEN` and the same command boots, logging which source supplied how many tokens
-and no value: the line to read when a token that ought to work does not.
+The process exits without ever listening, and it does so before the storage tier is contacted at all
+— which is why the connection string above only has to exist, not to work. Satisfy the gate with
+`$env:CADENCE_API_TOKEN = '<64 hex characters>'` and the same command gets past the map, logging
+which source supplied how many tokens and no value:
+
+```
+info: Cadence.Api[3002] Cadence's API accepted 1 token(s): 0 set in code, 0 from
+      Cadence:Api:Tokens, 1 from CADENCE_API_TOKEN. Values are never logged.
+```
+
+That is the line to read when a token that ought to work does not.
 
 ### Editing a schedule by hand
 
@@ -504,12 +515,22 @@ how Aspire is told which project to launch, and what generates the `Projects.*` 
 
 ### Running it without any infrastructure
 
-There is no separate zero-infrastructure sample; there is a two-line edit. Drop `UseSqlStorage` and
-the connection-string guard from `Cadence.Sample.ClusteredWorker/Program.cs` and it runs on the
-in-memory stores and the no-op coordinator: `dotnet run` on the project alone, no Docker, no
-database, the whole control surface still mounted. What you lose is everything this sample is about —
-history is a per-process ring that empties on restart, every `instanceId` in every response is the
-same string, and there is no occurrence to claim against anyone.
+There is no separate zero-infrastructure sample, because it is an edit rather than a project. Delete
+the `UseSqlStorage(...)` call and the connection-string lookup above it from
+`Cadence.Sample.ClusteredWorker/Program.cs` and `AddCadence` falls back to the in-memory stores and
+the no-op coordinator. `dotnet run` on the project alone then boots with no Docker and no database,
+and the whole control surface is still mounted on `http://localhost:5000`:
+
+```
+info: Cadence.Api[3002] Cadence's API accepted 1 token(s): 0 set in code, 1 from
+      Cadence:Api:Tokens, 0 from CADENCE_API_TOKEN.
+info: Cadence.Scheduling.CadenceHostedService[1004] Cadence started on instance
+      SEBASTIANS:29648:9642c7ee with 2 job(s), ticking every 00:00:01.
+```
+
+What you lose is everything this sample is about: run history becomes a per-process ring that empties
+on restart, every `instanceId` in every response is the same string, and there is no occurrence for
+anyone else to lose the race for.
 
 ### What it still cannot show
 
