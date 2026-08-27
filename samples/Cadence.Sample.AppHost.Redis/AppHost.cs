@@ -1,10 +1,9 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-// One database, shared by every replica. The unique index on CadenceJobRun is what decides which
-// replica gets to start a given occurrence, and it can only decide that if they all ask the same
-// database.
-var database = builder.AddSqlServer("sql")
-    .AddDatabase("cadence");
+// The twin of Cadence.Sample.AppHost.Sql, differing in these three lines and nothing else. One
+// Redis, shared by every replica: in this tier the claim is a key only one caller can create, and
+// it can only decide the race if all three replicas ask the same server.
+var redis = builder.AddRedis("cadence-redis");
 
 // One project, three replicas, each running the tick loop and serving the control surface. §13.6
 // forces that: a trigger dispatches in the process that received it, so an API tier over a separate
@@ -13,8 +12,8 @@ var database = builder.AddSqlServer("sql")
 // No fixed port — three replicas cannot share one, and Aspire's proxy in front of them is what
 // makes a manual run's InstanceId the ingress's choice rather than Cadence's.
 builder.AddProject<Projects.Cadence_Sample_ClusteredWorker>("worker")
-    .WithReference(database)
-    .WaitFor(database)
+    .WithReference(redis)
+    .WaitFor(redis)
     .WithHttpEndpoint()
     .WithReplicas(3);
 

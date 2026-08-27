@@ -15,11 +15,16 @@
     Cadence.Api is here because §13.6 of the design plan says it has to be: a trigger dispatches in
     the process that received it, so a replica that does not map the API is a replica no trigger can
     reach.
+
+    Both storage tiers are referenced and only one is used per run — which of them is decided at
+    startup by the connection string the AppHost injected. Referencing both is what lets one worker
+    project serve both clustered samples.
   -->
   <ItemGroup>
     <PackageReference Include="Cadence.Core" Version="0.2.*-*" />
     <PackageReference Include="Cadence.Api" Version="0.2.*-*" />
     <PackageReference Include="Cadence.Storage.Sql" Version="0.2.*-*" />
+    <PackageReference Include="Cadence.Storage.Redis" Version="0.2.*-*" />
   </ItemGroup>
 
   <!--

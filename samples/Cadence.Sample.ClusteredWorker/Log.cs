@@ -32,8 +32,8 @@ internal static partial class Log
     [LoggerMessage(
         EventId = 4,
         Level = LogLevel.Information,
-        Message = "Replica {Instance} joining the cluster against the shared Cadence database.")]
-    public static partial void ReplicaStarting(this ILogger logger, string instance);
+        Message = "Replica {Instance} joining the cluster on the {Tier} storage tier.")]
+    public static partial void ReplicaStarting(this ILogger logger, string instance, string tier);
 
     [LoggerMessage(
         EventId = 5,
