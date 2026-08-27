@@ -32,6 +32,7 @@ public sealed class RedisScheduleSource : IWritableScheduleSource, IAsyncDisposa
     private CancellationTokenSource _tokenSource = new();
     private long _knownVersion = -1;
     private Task? _watcher;
+    private int _disposed;
 
     internal RedisScheduleSource(
         RedisConnection connection,
@@ -178,6 +179,13 @@ public sealed class RedisScheduleSource : IWritableScheduleSource, IAsyncDisposa
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        // Guarded because the container captures this instance once per service type it is
+        // registered under, and disposes every capture.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         await _shutdown.CancelAsync().ConfigureAwait(false);
 
         if (_watcher is { } watcher)
