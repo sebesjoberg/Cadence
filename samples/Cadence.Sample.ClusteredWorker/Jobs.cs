@@ -8,16 +8,24 @@ namespace Cadence.Sample.ClusteredWorker;
 /// that as one <c>cadence.job</c> span per <c>job.scheduled_for</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The winner does not rotate, and watching this sample is the fastest way to learn that. Whichever
 /// replica started first has its tick phase a few tens of milliseconds ahead of the others, and a
 /// few tens of milliseconds is all a race to an <c>INSERT</c> needs — so it wins every occurrence
 /// until it dies. Claiming an occurrence is a correctness mechanism, not a load balancer; the other
 /// two replicas are failover capacity, and they take over immediately when the leader goes away.
+/// </para>
+/// <para>
+/// It allows an <c>Api</c> trigger as well, which is the other half of the demonstration: a
+/// triggered run executes wherever the request landed, so repeated triggers through Aspire's proxy
+/// spread across replicas while the scheduled ones do not.
+/// </para>
 /// </remarks>
 [ScheduledJob(
     Name = "tick-tock",
     Cron = "*/5 * * * * *",
-    MaxDuration = "00:00:30")]
+    MaxDuration = "00:00:30",
+    Triggers = TriggerKind.Schedule | TriggerKind.Api)]
 public sealed class TickTockJob(ILogger<TickTockJob> logger) : IJob
 {
     public async Task ExecuteAsync(JobContext context, CancellationToken cancellationToken)
@@ -78,5 +86,38 @@ public sealed class SlowSweepJob(ILogger<SlowSweepJob> logger) : IJob
         }
 
         logger.SweepFinished(context.InstanceId);
+    }
+}
+
+/// <summary>
+/// Has no cron, so it runs only when something asks. That makes it the honest test of the trigger
+/// endpoint: <c>tick-tock</c> fires every five seconds anyway, so a triggered run is hard to pick
+/// out of the noise, while a run of this job can only have come from a request.
+/// </summary>
+/// <remarks>
+/// It is also the only job here whose <c>cron</c> and <c>timeZone</c> come back null from
+/// <c>GET /cadence/api/jobs</c> — the shape a trigger-only job has on the wire.
+/// </remarks>
+[ScheduledJob(
+    Name = "reindex-catalog",
+    Triggers = TriggerKind.Api | TriggerKind.Manual,
+    MaxDuration = "00:00:30")]
+public sealed class ReindexCatalogJob(ILogger<ReindexCatalogJob> logger) : IJob
+{
+    public async Task ExecuteAsync(JobContext context, CancellationToken cancellationToken)
+    {
+        logger.ReindexStarting(context.InstanceId);
+
+        for (var batch = 1; batch <= 3; batch++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken);
+            context.Report($"reindexed batch {batch} of 3", new Dictionary<string, object?>
+            {
+                ["instance"] = context.InstanceId,
+                ["batch"] = batch,
+            });
+        }
+
+        logger.ReindexFinished(context.InstanceId);
     }
 }

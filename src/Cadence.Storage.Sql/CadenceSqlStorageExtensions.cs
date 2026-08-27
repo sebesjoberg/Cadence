@@ -10,6 +10,9 @@ namespace Cadence.Storage.Sql;
 /// <summary>Adds SQL Server persistence and clustering to Cadence.</summary>
 public static class CadenceSqlStorageExtensions
 {
+    /// <summary>The tag the storage health check is registered under.</summary>
+    private const string StorageHealthTag = "cadence.storage";
+
     /// <summary>
     /// Moves schedules, run history and occurrence claiming into SQL Server.
     /// </summary>
@@ -53,6 +56,16 @@ public static class CadenceSqlStorageExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton(sp => new SqlDatabase(sp.GetRequiredService<SqlStorageOptions>()));
 
+        // Guarded because AddCheck appends unconditionally and duplicate names throw, so a second
+        // UseSqlStorage call would break HealthCheckService.
+        if (!services.Any(service => service.ServiceType == typeof(SqlStorageHealthCheck)))
+        {
+            services.AddSingleton<SqlStorageHealthCheck>();
+
+            services.AddHealthChecks()
+                .AddCheck<SqlStorageHealthCheck>("cadence-sql", tags: [StorageHealthTag]);
+        }
+
         // Replace, not TryAdd: AddCadence offers its in-memory defaults with TryAdd after the
         // configuration callback has run, so whatever is registered here wins.
         services.Replace(ServiceDescriptor.Singleton<IOccurrenceCoordinator>(sp =>
@@ -62,9 +75,8 @@ public static class CadenceSqlStorageExtensions
                 sp.GetRequiredService<IOptions<CadenceOptions>>(),
                 sp.GetRequiredService<ILogger<SqlOccurrenceCoordinator>>())));
 
-        // Registered as the concrete type as well, because the janitor needs the maintenance
-        // operations that are not on IRunHistoryStore -- per-job trimming and reaping. Both
-        // registrations resolve the same singleton, so there is one log-flush buffer, not two.
+        // Registered as the concrete type too: the janitor needs trimming and reaping, which are not
+        // on IRunHistoryStore. Both registrations resolve the same singleton, so one flush buffer.
         services.TryAddSingleton(sp => new SqlRunHistoryStore(
             sp.GetRequiredService<SqlDatabase>(),
             sp.GetRequiredService<SqlStorageOptions>(),

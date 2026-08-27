@@ -30,12 +30,13 @@ public sealed class SqlScheduleSource : IWritableScheduleSource, IDisposable
     private readonly ISystemClock _clock;
     private readonly ILogger<SqlScheduleSource> _logger;
     private readonly Lock _gate = new();
-    private readonly CancellationTokenSource _disposed = new();
+    private readonly CancellationTokenSource _shutdown = new();
 
     private CancellationTokenSource _changed = new();
     private long _knownVersion = -1;
     private DateTimeOffset _lastPoll = DateTimeOffset.MinValue;
     private Task? _poll;
+    private int _disposed;
 
     internal SqlScheduleSource(
         SqlDatabase database,
@@ -201,8 +202,15 @@ public sealed class SqlScheduleSource : IWritableScheduleSource, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        _disposed.Cancel();
-        _disposed.Dispose();
+        // Guarded because the container captures this instance once per service type it is
+        // registered under, and disposes every capture.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _shutdown.Cancel();
+        _shutdown.Dispose();
 
         lock (_gate)
         {
@@ -252,7 +260,7 @@ public sealed class SqlScheduleSource : IWritableScheduleSource, IDisposable
     {
         lock (_gate)
         {
-            if (_disposed.IsCancellationRequested
+            if (_shutdown.IsCancellationRequested
                 || (_poll is { IsCompleted: false })
                 || _clock.UtcNow - _lastPoll < _options.SchedulePollInterval)
             {
@@ -268,7 +276,7 @@ public sealed class SqlScheduleSource : IWritableScheduleSource, IDisposable
     {
         try
         {
-            await PollAsync(_disposed.Token).ConfigureAwait(false);
+            await PollAsync(_shutdown.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

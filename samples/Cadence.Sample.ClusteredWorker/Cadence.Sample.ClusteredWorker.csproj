@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -10,25 +10,38 @@
 
   <!--
     Cadence comes from the local package feed (see ../NuGet.config), built by ../../scripts/pack.ps1.
-    Same reason as Cadence.Sample.Worker: a project reference would hide packaging mistakes until the
-    first real publish.
+    A project reference would hide packaging mistakes until the first real publish.
 
-    This is also the first thing that consumes Cadence.Storage.Sql as a package rather than by
-    project reference, so it is the first check that the SQL tier packs correctly at all.
+    Cadence.Api is here because §13.6 of the design plan says it has to be: a trigger dispatches in
+    the process that received it, so a replica that does not map the API is a replica no trigger can
+    reach.
+
+    Both storage tiers are referenced and only one is used per run — which of them is decided at
+    startup by the connection string the AppHost injected. Referencing both is what lets one worker
+    project serve both clustered samples.
   -->
   <ItemGroup>
     <PackageReference Include="Cadence.Core" Version="0.2.*-*" />
+    <PackageReference Include="Cadence.Api" Version="0.2.*-*" />
     <PackageReference Include="Cadence.Storage.Sql" Version="0.2.*-*" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Cadence.Storage.Redis" Version="0.2.*-*" />
   </ItemGroup>
 
   <!--
-    OTLP rather than the console exporter Cadence.Sample.Worker uses. Aspire runs a dashboard that
-    collects OTLP from every replica, which is what turns "one run per occurrence" from a claim into
-    something visible: three replicas, one span per scheduled_for.
+    The document comes from the framework; only the UI needs a package, and its assets are embedded
+    rather than fetched from a CDN.
+
+    10.0.11 rather than the 10.0.0 its siblings pin: 10.0.0 resolves Microsoft.OpenApi 2.0.0, which
+    restore rejects as a known vulnerability (NU1903).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+  </ItemGroup>
+
+  <!--
+    OTLP rather than the console exporter Cadence.Sample.Worker uses. Aspire's dashboard collects
+    OTLP from every replica, which is what turns "one run per occurrence" into something visible.
   -->
   <ItemGroup>
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />

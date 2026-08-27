@@ -159,7 +159,7 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | **v0.1** | Core | `IJob`, registration, tick loop, per-run scope, dual cancellation, in-memory stores, boot probe, OTel, graceful drain — *done* |
 | **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*, with the Aspire host demonstrating it between real processes |
 | — | **decision point** | *resolved — see below* |
-| v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause. *Landed: pause, and `MapCadenceApi()`'s map-time gate; the writable schedule source and change tokens arrived early, in v0.2. Still §13's design: the endpoints, the `CadenceToken` handler, the health checks.* |
+| v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause — *done* |
 | v0.3.1 | Identity | `ICredentialStore` on both tiers, its conformance suite, login and sessions, API-token creation and revocation — §13.5 |
 | v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
@@ -209,10 +209,11 @@ stores.
 
 **Gap 3. Schedule store unavailable — boot versus tick.** Undefined today. Recommendation: never
 fail boot on a store blip. Start from code defaults, report degraded health, raise an alert. A
-database hiccup must not stop the whole application from starting. *"Report degraded health" gets a
-mechanism in v0.3 — §13.4 — and one constraint that was not obvious when this was written: the
-degraded signal must not reach the orchestrator. Every replica shares one store, so a probe that
-fails on a store blip fails on all of them at once.*
+database hiccup must not stop the whole application from starting. *"Report degraded health" got
+its mechanism in v0.3 — §13.4: two probes whose constructors are proven store-free by an allow-list
+test, storage checks that report `Degraded` from the storage packages themselves, and the access
+split that keeps the degraded signal away from the orchestrator — every replica shares one store, so
+a probe that fails on a store blip fails on all of them at once.*
 
 **Gap 7. Alert state in memory means a crash-loop resets cooldowns and floods.** Warn at
 boot if alerting is enabled without a persistent store.
@@ -285,6 +286,17 @@ replicas share the load will size it wrong.
 the claim; pulling work from a queue instead of executing what was claimed (§14.1) makes tick phase
 stop deciding who works at all, which is why the cheaper fix waits on the better one. §14.3 records
 what the finding costs under an orchestrator, where an autoscaler adds replicas that win nothing.
+
+### 9.5 `Cadence.Core` takes the full health-checks package, not the abstractions
+
+v0.3's constraint was that health checks enter Core through
+`Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` only. Core references
+`Microsoft.Extensions.Diagnostics.HealthChecks` instead, because `AddHealthChecks()` and `AddCheck`
+live in the larger package and there is no way to register a check without them. The spirit of the
+constraint holds — a test asserts `Cadence.Core`'s assembly carries no reference to
+`Microsoft.AspNetCore.*`, even transitively — but the cost is real and worth naming: every Core
+consumer now gets `DefaultHealthCheckService` and the health-check publisher hosted service, the
+latter inert with no publisher registered. Recorded so nobody rediscovers it as a violation.
 
 ---
 
@@ -395,6 +407,10 @@ app.MapCadenceApi();          // v0.3
 // app.MapCadenceDashboard(); // v0.4
 ```
 
+`MapCadenceApi()` returns the `RouteGroupBuilder` it mounted, so a host can attach its own
+conventions — rate limiting, CORS, OpenAPI metadata — to the tree it just added. For endpoints that
+start jobs, rate limiting is a realistic ask.
+
 ### 13.2 The surface, and the one write that is not on it
 
 ```
@@ -425,23 +441,46 @@ Status codes fall out of exceptions that already exist, as RFC 9457 `ProblemDeta
 | triggers paused | 409 | `SchedulerPausedException`, with who paused it and why |
 | job not registered here | 404 | `JobNotFoundException` |
 | trigger kind not allowed | 400 | `TriggerNotAllowedException`, listing what the job does allow |
+| pause scope not a defined flag | 400 | `ProblemMapper.InvalidPauseScope` — `Enum.TryParse` accepts bare numbers, so the parsed scope is masked against the defined members |
 
-`DispatchResult.Skipped` is the row to watch. It is not an error, and it is not success, and the
-easy mistake is to answer 200 with an empty body — which tells a caller that a run started when
-none did. Three further choices:
+`type` is a URN — `urn:cadence:problem:{slug}` — not an `https` URL. RFC 9457 wants an identifier,
+not necessarily a page, and an `https` type would name a domain nobody here controls and a project
+name that is not settled. One constant moves if either ever changes.
 
-- **The endpoint passes `TriggerKind.Api`, not `Manual`**, so history separates "someone clicked"
-  from "something called us". `JobTrigger` already refuses `Schedule` on its own.
-- **`limit` is capped at 500** whatever is asked for. `RunQuery.Limit` has no ceiling of its own,
-  which makes an unbounded `limit` a one-request denial against the history store.
-- **Responses are explicit records behind a source-generated `JsonSerializerContext`.** Serialising
-  `JobRun` directly would make every future storage column a public API change.
+Responses are explicit records behind a source-generated `JsonSerializerContext` rather than
+`JobRun` serialised directly, because otherwise every future storage column would be a public API
+change.
+
+**Three corrections the implementation forced.**
+
+A disallowed trigger kind answers **400**, not the 409 this table first said. Nothing the caller
+waits for changes a job's declared triggers, so it is a malformed request; 409 stays for a skipped
+dispatch and a paused scheduler, which are a correct request at the wrong moment.
+
+`GET /runs/{id}` had nothing to call — `IRunHistoryStore` had no by-id lookup, only queries and the
+two last-run reads. It has one now, on all three tiers.
+
+The 500-row cap bounds rows, not payload: both persistent tiers attach every run's progress entries
+to a query result, so a capped list request was fetching 500 logs to render a view showing none.
+`RunQuery.IncludeLog` (default `true`, so no existing caller moved) lets a list skip the second
+query entirely rather than fetching and discarding it.
+
+**Two boundaries worth stating so nobody rediscovers them.** An unparseable `status`, `from`, `to`,
+`limit` or `offset` returns the framework's 400 with an empty body, not an RFC 9457 document —
+parameter binding fails before any endpoint filter can reformat it, and owning those bodies would
+mean hand-rolling five parsers. Same class as the `{id:guid}` route constraint answering 404 for a
+malformed run id. And the trigger endpoint accepts **no payload**: accepting caller JSON would
+widen what a token can do from "start the job as configured" to "start the job with arbitrary
+input", which needs its own size and shape rules and its own line in the trust argument.
+In-process callers can still pass one.
 
 ### 13.3 The gate
 
 One authentication scheme, `CadenceToken`, reading `Authorization: Bearer`. Comparison hashes both
 sides with SHA-256 before `CryptographicOperations.FixedTimeEquals`, so the compare is
-fixed-length and token length does not leak.
+fixed-length and token length does not leak. The scheme name is public as
+`CadenceApiDefaults.AuthenticationScheme`, because a host writing its own policy has to be able to
+name it without hardcoding a literal.
 
 Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
 
@@ -450,15 +489,38 @@ Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
 | `options.RequireAuthorization("policy")` | maps; the host's policy governs |
 | one or more tokens configured | maps; built-in policy requires an authenticated `CadenceToken` |
 | `options.AllowUnauthenticated = true` | maps, warning logged **every start** |
-| none of those, `IsDevelopment()` | maps, loud warning |
+| none of those, `IsDevelopment()` | maps, loud warning, **loopback callers only** |
 | none of those, anything else | **throws**, naming all three remedies |
-
-*That table is the part that has landed. Everything else in §13.3 is still design.*
 
 The composition rule is one sentence: **a named policy governs alone, and the token scheme
 authenticates into it.** Token auth produces a principal carrying a `cadence:token` claim and the
 host's policy decides whether that is sufficient, so an app with OIDC can accept both by writing
-one policy. No OR-policy machinery.
+one policy: `MapCadenceApi` selects `options.PolicyName ?? (Tokens.Count > 0 ? Policy : null)`.
+
+**The scheme and its built-in policy are registered conditionally, and only ever together.** Both
+are wired through `AddOptions<...>().Configure<IOptions<CadenceApiOptions>>(...)` rather than at
+`AddApi` time, because whether a token exists cannot be evaluated until options bind — and
+resolving `AuthenticationOptions` *causes* that binding, which is stronger than merely deferring
+until after it. The policy is deferred on the identical condition as the scheme: a policy naming a
+scheme that was never registered is a 500 on every request, and the deployments that would hit that
+are `AllowUnauthenticated` and Development — exactly where an operator least expects a hard
+failure.
+
+**The Development branch answers loopback callers only.** An endpoint filter on the group returns
+403 with a `ProblemDetails` naming all three remedies when `RemoteIpAddress` is not loopback. It is
+applied on that branch alone — not to `AllowUnauthenticated`, where a proxy or mesh in front makes
+every legitimate caller non-loopback, and not where a policy was applied, where the request is
+already authenticated. The case it closes is `ASPNETCORE_ENVIRONMENT=Development` surviving into a
+container, which is among the commonest .NET misconfigurations and cost nothing before this
+milestone; it now exposes "run any registered job" and "halt scheduling cluster-wide" to whatever
+can reach the port. A developer on localhost sees no difference at all, which is why this is a
+filter and not a second flag.
+
+**A null `RemoteIpAddress` counts as loopback.** Kestrel over TCP always fills it in, so nothing
+arriving over the network is null; null means a transport with no IP peer — an in-memory
+`TestServer`, a Unix domain socket, a named pipe — none of which is the exposed TCP port the filter
+exists to close. Refusing null instead would 403 every in-memory test host and every socket-fronted
+deployment while closing nothing.
 
 `AllowUnauthenticated` exists for an authenticating proxy or an mTLS mesh, and because without it
 people reach for something worse — an anonymous wrapper, or a second port with no gate on it. One
@@ -473,12 +535,18 @@ Tokens come from configuration, and also from `CADENCE_API_TOKEN` (comma-separat
 `Cadence__Api__Tokens__0=` is miserable in a compose file. Two sources is two places to look when
 it does not work, so boot logs which source supplied them and how many.
 
+**`PUT /pause` records who from the authenticated principal, never from the body.** The identity is
+`token:{first 8 hex of the token's SHA-256}` — stable across restarts, so repeated pauses attribute
+to the same caller, and not a secret. A `setBy` a caller could write would not be an audit field, so
+`PauseRequest` has no such member; under `AllowUnauthenticated`, where there is no principal, it
+records `api`.
+
 ### 13.4 Health, and why the probes must not know about storage
 
 | Check | Tag | Registered by |
 |---|---|---|
-| `cadence-live` | `live` | `AddCadence()` — the process is up |
-| `cadence-ready` | `ready` | `AddCadence()` — boot probe passed, jobs registered |
+| `cadence-live` | `cadence.live` | `AddCadence()` — the process is up |
+| `cadence-ready` | `cadence.ready` | `AddCadence()` — boot probe passed, jobs registered |
 | `cadence-sql` | `cadence.storage` | `UseSqlStorage()` — `SELECT 1` |
 | `cadence-redis` | `cadence.storage` | `UseRedisStorage()` — `PING` |
 
@@ -490,9 +558,28 @@ investigate, while the rolling deploy that would have fixed it stalls. The stric
 still: liveness tied to the store turns a database hiccup into a cluster-wide crash loop, each
 restart re-running the migrator against the store that is already struggling.
 
+**The guarantee is structural, not a promise kept by discipline.** A reflection test asserts each
+probe's constructor takes only an allow-listed parameter type — not a blacklist of the store
+interfaces, which any of `IServiceProvider`, `Func<IPauseStore>` or `Lazy<T>` would have walked
+straight through undetected. `ReadinessHealthCheck` takes the job count as a plain `int` captured
+at registration rather than an `IJobRegistry`, because that dependency would make the guarantee
+conventional rather than structural — this solution already has schedule sources backed by a
+database. A second, one-line test asserts `Cadence.Core`'s assembly carries no reference to
+`Microsoft.AspNetCore.*` at all.
+
 Storage health is therefore reported to humans, alerting and the dashboard, never to the kubelet,
 and it reports `Degraded` rather than `Unhealthy`. This is where §8 gap #3's "report degraded
-health" lands.
+health" lands. That behaviour is pinned by a test against a closed port, which needs no container;
+the tests that exercise it against a live SQL Server or Redis are written but have not run on this
+machine, where Docker is unavailable, so nothing here should be read as verified against a real
+store.
+
+**All three tags are namespaced, and that is what makes the guarantee hold under composition.**
+`MapCadenceHealth()` selects purely by tag, so bare `live` and `ready` would silently adopt a host
+check written the way the ASP.NET Core documentation writes them — `AddSqlServer(cs, tags:
+["ready"])` — and put that database back on the readiness probe by the front door, which is the
+cluster-wide 503 this whole section exists to prevent. A host check tagged `live` or `ready` now
+joins neither probe.
 
 Storage checks are registered by the storage packages as ordinary `IHealthCheck`s, which needs no
 new Cadence seam. `MapCadenceHealth()` is a convenience with configurable paths; the tags are
@@ -501,6 +588,13 @@ load-bearing:
 
 - `/health/live`, `/health/ready` — **anonymous**. The kubelet cannot present a token.
 - `/cadence/api/health/storage` — **behind the gate**. It returns the last store error.
+
+`AddCadence()`, `UseSqlStorage()`, `UseRedisStorage()` and `AddApi()` are each safe to call twice.
+Health-check registration is guarded explicitly, because the health check service throws on a
+duplicate registration name where the rest of DI would just overwrite; `AddApi`'s deferred
+`AddScheme` is guarded on `SchemeMap` for the same reason, and there the blast radius is wider —
+`AuthenticationOptions` is app-wide, so an unguarded duplicate takes the *host's* authentication
+down with Cadence's.
 
 ### 13.5 Identity, and the tier that has no store
 

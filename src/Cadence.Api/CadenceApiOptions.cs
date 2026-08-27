@@ -1,3 +1,5 @@
+using Cadence.Api.Internal;
+
 namespace Cadence.Api;
 
 /// <summary>
@@ -11,10 +13,12 @@ public sealed class CadenceApiOptions
 
     /// <summary>
     /// Tokens accepted as <c>Authorization: Bearer</c>. Configuring one satisfies the mapping gate.
-    /// Binding from <c>CADENCE_API_TOKEN</c> and <c>Cadence:Api:Tokens</c> is not wired yet, so for
-    /// now these are set in code.
+    /// Bound from <c>Cadence:Api:Tokens</c> and from <c>CADENCE_API_TOKEN</c> (comma-separated) in
+    /// addition to anything set here in code; boot logs how many each source supplied.
     /// </summary>
     public IList<string> Tokens { get; } = [];
+
+    internal TokenSources TokenSources { get; set; } = new(0, 0, 0);
 
     /// <summary>
     /// Maps the endpoints with no authentication of Cadence's own, for a deployment where a proxy
@@ -29,7 +33,9 @@ public sealed class CadenceApiOptions
     /// <summary>
     /// Requires an authorization policy of the host's own. A named policy governs alone: the token
     /// scheme authenticates into it rather than bypassing it, so a host with its own identity
-    /// provider can accept both by writing one policy.
+    /// provider can accept both by writing one policy. That policy must list
+    /// <see cref="CadenceApiDefaults.AuthenticationScheme"/> among its authentication schemes:
+    /// Cadence makes it no host's default scheme, so a policy naming none authenticates nobody.
     /// </summary>
     /// <param name="policyName">The policy name, as registered with ASP.NET Core authorization.</param>
     public void RequireAuthorization(string policyName)

@@ -130,6 +130,8 @@ internal sealed class CountingHistoryStore : IRunHistoryStore
 
     public Task AppendLogAsync(Guid runId, JobLogEntry entry, CancellationToken ct) => Task.CompletedTask;
 
+    public Task<JobRun?> GetAsync(Guid runId, CancellationToken ct) => Task.FromResult<JobRun?>(null);
+
     public Task<JobRun?> GetLastRunAsync(string jobName, CancellationToken ct) => Task.FromResult<JobRun?>(null);
 
     public Task<JobRun?> GetLastSuccessAsync(string jobName, CancellationToken ct)

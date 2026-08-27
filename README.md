@@ -94,6 +94,95 @@ Persistence and clustering arrive together on purpose. Splitting them would let 
 deploy two instances with shared history and no coordinator — which runs every
 occurrence twice while looking perfectly healthy in the logs.
 
+## The control surface
+
+`AddApi()` on the Cadence builder registers the machine-callable API's services; `MapCadenceApi()`
+on the app mounts it, and `MapCadenceHealth()` maps liveness and readiness alongside it:
+
+```csharp
+builder.Services.AddCadence(cadence => cadence
+    .UseSqlStorage(connectionString)
+    .AddApi());
+
+app.MapCadenceApi();
+app.MapCadenceHealth();
+```
+
+| Endpoint | Does |
+|---|---|
+| `POST /cadence/api/jobs/{name}/trigger` | starts a run — 202 |
+| `GET /cadence/api/jobs` | job summaries |
+| `GET /cadence/api/jobs/{name}` | job detail and recent runs |
+| `GET /cadence/api/runs` | run history, filtered by `job`, `status`, `from`, `to`, `instance`, `limit`, `offset` |
+| `GET /cadence/api/runs/{id}` | one run, including its log |
+| `GET /cadence/api/pause` | the current pause switches |
+| `PUT /cadence/api/pause` | changes them — 204, or 400 for a scope outside the defined flags |
+| `GET /cadence/api/health/storage` | storage health, for humans and the dashboard |
+
+Schedule edits are not on this tree, on purpose: a triggered run is loud, appears in history, and is
+over; a changed cron expression is silent and permanent. A token can start work and stop it — only
+a person changes when work happens.
+
+### The mapping gate
+
+`MapCadenceApi()` refuses to map outside `Development` unless something will authenticate it, so
+that shipping the package cannot silently expose "run any registered job" to the internet. The
+refusal happens at *map* time — during startup, before the server listens — so a missing token fails
+the deploy rather than whoever finds the open endpoint first. Satisfy it one of four ways:
+
+- Configure one or more tokens (below).
+- Call `options.RequireAuthorization("policy")` inside `AddApi(options => ...)` to hand the gate to
+  a policy of your own. If you also configure at least one token, that policy can name
+  `CadenceApiDefaults.AuthenticationScheme` and the token scheme authenticates into it — so an app
+  with its own OIDC setup can accept both by writing one policy. Naming that scheme with no token
+  configured leaves it unregistered, and every request answers 500.
+- Set `AllowUnauthenticated = true`, for a deployment a proxy or mesh already authenticates. Logged
+  as a warning on every start.
+- Run in `Development`, where mapping proceeds with a loud warning instead of a throw. The write
+  endpoints are reachable on that path — `POST /trigger` runs any registered job, `PUT /pause`
+  halts scheduling cluster-wide — so on this path alone Cadence answers **loopback callers only**
+  and returns 403 to anyone else. A container that shipped with
+  `ASPNETCORE_ENVIRONMENT=Development` is therefore embarrassing rather than exploitable; localhost
+  sees no difference.
+
+### Tokens
+
+Tokens are read from `Cadence:Api:Tokens` in configuration and from `CADENCE_API_TOKEN`
+(comma-separated — `Cadence__Api__Tokens__0=` is miserable to write in a compose file), on top of
+anything set in code. Boot logs how many tokens each source supplied, never a value.
+
+**Use a high-entropy token** — `openssl rand -hex 32`. A pause records the caller as
+`token:{first 8 hex of the token's SHA-256}`, readable by anyone who can read `GET /pause`, and that
+fingerprint is an offline confirmation oracle against a guessable token: a guess can be checked
+without ever touching this service.
+
+**Rotating a token requires a restart.** The accepted set is built once from `IOptions<>`, not
+`IOptionsMonitor<>`, so editing `Cadence:Api:Tokens` in a reload-on-change file changes nothing
+until the process restarts.
+
+### Health
+
+| Path | Tag | Access |
+|---|---|---|
+| `/health/live` | `cadence.live` | anonymous |
+| `/health/ready` | `cadence.ready` | anonymous |
+| `/cadence/api/health/storage` | `cadence.storage` | behind the gate |
+
+The tags are documented contract: an app that already maps its own `/health` can compose them by
+hand instead of calling `MapCadenceHealth()`. Storage health is never on the probe tags — every
+replica shares one store, so a probe that can see the store takes every pod out of service on the
+same blip, during exactly the incident someone needs the service up to investigate.
+
+All three tags are namespaced for the same reason. `MapCadenceHealth()` selects purely by tag, so a
+check of your own tagged `live` or `ready` — the way the ASP.NET Core documentation writes them —
+joins neither probe. Tag it `cadence.ready` only if you genuinely want a readiness failure on every
+replica at once.
+
+**HTTPS is documented, not enforced.** A bearer token over plaintext is a leaked token, but TLS
+terminates at the ingress in every real deployment, and Cadence has no reliable way to tell whether
+something upstream already terminated it — guessing wrong is possible in both directions. Put this
+behind TLS.
+
 ## Choosing a storage tier
 
 `UseSqlStorage` and `UseRedisStorage` are alternatives. Both replace the same three
@@ -144,13 +233,32 @@ The Redis tier has no equivalent, and no migrator, application lock or reviewabl
 folder either. A key exists once something writes it, which removes the question rather
 than answering it.
 
+## Samples
+
+Three things to run under [`samples/`](samples/README.md), all consuming Cadence as packages from a
+local feed that `./scripts/pack.ps1` builds:
+
+| | |
+|---|---|
+| `Cadence.Sample.Worker` | one job, no infrastructure, the whole telemetry fan-out on the console |
+| `Cadence.Sample.AppHost.Sql` | .NET Aspire, a SQL Server container, three replicas of one web host |
+| `Cadence.Sample.AppHost.Redis` | the same three replicas against Redis — the store is the only difference |
+
+```powershell
+./scripts/pack.ps1
+dotnet run --project samples/Cadence.Sample.AppHost.Sql
+```
+
+[samples/README.md](samples/README.md) has the walkthroughs: triggers spreading across replicas,
+one run per occurrence, a pause reaching every replica, and what measurably differs between the
+two tiers.
+
 **Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is complete,
-with both tiers held to one conformance suite that runs against a real server in CI, and the Aspire
-multi-replica sample demonstrates it between real processes. v0.3, the control surface, is under
-way: distributed pause has landed, and the machine-callable API, its auth gate and the health
-checks are designed but not yet built — see §13 of the design plan. Sign-in, sessions and
-dashboard-created API tokens follow in v0.3.1, and the dashboard itself in v0.4. Not yet published
-to NuGet.
+with both tiers held to one conformance suite that runs against a real server in CI, and a pair of
+Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
+control surface, is complete: the machine-callable API, its token auth gate and the health checks
+described above, alongside distributed pause. Sign-in, sessions and dashboard-created API tokens
+follow in v0.3.1, and the dashboard itself in v0.4. Not yet published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

@@ -15,6 +15,11 @@ namespace Cadence;
 /// <summary>Registers Cadence with the host's service collection.</summary>
 public static class CadenceServiceCollectionExtensions
 {
+    // Namespaced because MapCadenceHealth selects purely by tag: a host's own database check tagged
+    // "ready" would otherwise land on Cadence's readiness probe.
+    private const string LiveTag = "cadence.live";
+    private const string ReadyTag = "cadence.ready";
+
     /// <summary>
     /// Adds the scheduler. With no further configuration this gives code-defined schedules,
     /// in-memory run history, single-instance coordination and OpenTelemetry output — no external
@@ -58,7 +63,21 @@ public static class CadenceServiceCollectionExtensions
         services.AddOptions<CadenceOptions>();
         services.AddMetrics();
 
+        services.TryAddSingleton<CadenceReadiness>();
+
         var descriptors = builder.Jobs.ToList();
+
+        // Neither check is given a store: replicas share one, so a store-honest readiness probe
+        // would empty the service on every pod at once. Guarded because AddCheck appends
+        // unconditionally and duplicate names throw, so a second AddCadence call would break.
+        if (!services.Any(service => service.ImplementationType == typeof(CadenceHostedService)))
+        {
+            services.AddHealthChecks()
+                .AddCheck<LivenessHealthCheck>("cadence-live", tags: [LiveTag])
+                .AddTypeActivatedCheck<ReadinessHealthCheck>(
+                    "cadence-ready", failureStatus: null, tags: [ReadyTag], args: descriptors.Count);
+        }
+
         services.AddSingleton<IJobRegistry>(_ => new JobRegistry(descriptors));
         services.AddSingleton(new RegistrationDiagnostics(builder.Warnings));
 

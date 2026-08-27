@@ -144,6 +144,22 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
         => _logAppender.FlushNowAsync(cancellationToken);
 
     /// <inheritdoc />
+    public async Task<JobRun?> GetAsync(Guid runId, CancellationToken cancellationToken)
+    {
+        var runs = await _database.QueryAsync(
+            $"""
+            SELECT TOP (1) {RunColumns}
+            FROM {_database.Table("CadenceJobRun")}
+            WHERE RunId = @RunId;
+            """,
+            command => SqlValues.AddGuid(command, "@RunId", runId),
+            ReadRun,
+            cancellationToken).ConfigureAwait(false);
+
+        return runs.Count == 0 ? null : await WithLogAsync(runs[0], cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<JobRun?> GetLastRunAsync(string jobName, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobName);
@@ -280,7 +296,9 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
             ReadRun,
             cancellationToken).ConfigureAwait(false);
 
-        return await WithLogsAsync(runs, cancellationToken).ConfigureAwait(false);
+        return query.IncludeLog
+            ? await WithLogsAsync(runs, cancellationToken).ConfigureAwait(false)
+            : runs;
     }
 
     /// <inheritdoc />

@@ -2,7 +2,8 @@ namespace Cadence.Execution;
 
 /// <summary>
 /// Thrown when a job does not accept the requested trigger. The API layer maps this to
-/// <c>409 Conflict</c>.
+/// <c>400 Bad Request</c>: a trigger kind the job does not declare is a malformed request, and no
+/// amount of waiting will make it succeed.
 /// </summary>
 public sealed class TriggerNotAllowedException : Exception
 {
