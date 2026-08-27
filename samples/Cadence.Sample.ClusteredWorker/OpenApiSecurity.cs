@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
-namespace Cadence.Sample.Api;
+namespace Cadence.Sample.ClusteredWorker;
 
 /// <summary>
 /// Teaches the OpenAPI document how to authenticate to Cadence, which is what puts an Authorize

@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Cadence.Sample.Api": {
+    "Cadence.Sample.ClusteredWorker": {
       "commandName": "Project",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"

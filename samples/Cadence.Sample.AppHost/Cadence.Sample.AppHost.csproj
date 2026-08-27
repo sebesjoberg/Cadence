@@ -28,7 +28,6 @@
   -->
   <ItemGroup>
     <ProjectReference Include="..\Cadence.Sample.ClusteredWorker\Cadence.Sample.ClusteredWorker.csproj" />
-    <ProjectReference Include="..\Cadence.Sample.Api\Cadence.Sample.Api.csproj" />
   </ItemGroup>
 
 </Project>

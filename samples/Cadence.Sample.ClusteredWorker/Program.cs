@@ -1,17 +1,16 @@
 using Cadence;
+using Cadence.Api;
 using Cadence.Diagnostics;
 using Cadence.Sample.ClusteredWorker;
 using Cadence.Storage.Sql;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
-var builder = Host.CreateApplicationBuilder(args);
+// A web host, not a worker host, and every replica is one. §13.6: a trigger dispatches in the
+// process that received it, so a replica without the API is a replica no trigger can reach.
+var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<ServiceProviderOptions>(options =>
 {
@@ -34,6 +33,7 @@ builder.Services.AddCadence(cadence => cadence
         options.InstanceId = instanceId;
         options.MaxConcurrentRuns = 4;
     })
+    .AddApi()
     .UseSqlStorage(connectionString, sql =>
     {
         // Demo timings, not production ones. The defaults are 15s / 60s / 5min, which are right for
@@ -51,6 +51,11 @@ builder.Services.AddCadence(cadence => cadence
         // the README does not need a coffee break.
         sql.SchedulePollInterval = TimeSpan.FromSeconds(5);
     }));
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddOpenApi(openApi => openApi.AddCadenceTokenSecurity());
+}
 
 builder.Logging.AddSimpleConsole(console =>
 {
@@ -81,13 +86,22 @@ builder.Services.AddOpenTelemetry()
         .AddMeter(CadenceDiagnostics.SourceName)
         .AddOtlpExporter());
 
-var host = builder.Build();
+var app = builder.Build();
 
-host.Services.GetRequiredService<ILoggerFactory>()
-    .CreateLogger("Sample")
-    .ReplicaStarting(instanceId);
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.UseSwaggerUI(ui => ui.SwaggerEndpoint("/openapi/v1.json", "Cadence control surface"));
+}
 
-await host.RunAsync();
+// The gate: this throws outside Development unless something will authenticate the tree. What
+// satisfies it here is the token in appsettings.Development.json.
+app.MapCadenceApi();
+app.MapCadenceHealth();
+
+app.Logger.ReplicaStarting(instanceId);
+
+await app.RunAsync();
 
 namespace Cadence.Sample.ClusteredWorker
 {
