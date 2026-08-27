@@ -233,12 +233,32 @@ The Redis tier has no equivalent, and no migrator, application lock or reviewabl
 folder either. A key exists once something writes it, which removes the question rather
 than answering it.
 
+## Samples
+
+Three things to run under [`samples/`](samples/README.md), all consuming Cadence as packages from a
+local feed that `./scripts/pack.ps1` builds:
+
+| | |
+|---|---|
+| `Cadence.Sample.Worker` | one job, no infrastructure, the whole telemetry fan-out on the console |
+| `Cadence.Sample.AppHost.Sql` | .NET Aspire, a SQL Server container, three replicas of one web host |
+| `Cadence.Sample.AppHost.Redis` | the same three replicas against Redis — the store is the only difference |
+
+```powershell
+./scripts/pack.ps1
+dotnet run --project samples/Cadence.Sample.AppHost.Sql
+```
+
+[samples/README.md](samples/README.md) has the walkthroughs: triggers spreading across replicas,
+one run per occurrence, a pause reaching every replica, and what measurably differs between the
+two tiers.
+
 **Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is complete,
-with both tiers held to one conformance suite that runs against a real server in CI, and the Aspire
-multi-replica sample demonstrates it between real processes. v0.3, the control surface, is
-complete: the machine-callable API, its token auth gate and the health checks described above,
-alongside distributed pause. Sign-in, sessions and dashboard-created API tokens follow in v0.3.1,
-and the dashboard itself in v0.4. Not yet published to NuGet.
+with both tiers held to one conformance suite that runs against a real server in CI, and a pair of
+Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
+control surface, is complete: the machine-callable API, its token auth gate and the health checks
+described above, alongside distributed pause. Sign-in, sessions and dashboard-created API tokens
+follow in v0.3.1, and the dashboard itself in v0.4. Not yet published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

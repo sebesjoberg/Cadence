@@ -3,8 +3,14 @@
 | Sample | What it is for |
 |---|---|
 | `Cadence.Sample.Worker` | The telemetry fan-out, on the zero-infrastructure path. One job, in-memory stores, OTel to the console. |
-| `Cadence.Sample.ClusteredWorker` | The deployable shape: Core, the SQL tier and the control surface in **one** web host. Launched by the AppHost, not directly. |
-| `Cadence.Sample.AppHost` | Aspire, a SQL Server container, and three replicas of that host behind one proxied endpoint. |
+| `Cadence.Sample.ClusteredWorker` | The deployable shape: Core, a storage tier and the control surface in **one** web host. Launched by one of the two AppHosts, not directly. |
+| `Cadence.Sample.AppHost.Sql` | Aspire, a SQL Server container, and three replicas of that host behind one proxied endpoint. |
+| `Cadence.Sample.AppHost.Redis` | The same three replicas, the same walkthrough, against a Redis container. **The store is the only difference.** |
+
+The last two are a matched pair. They launch the same worker project, register the same three jobs,
+mount the same control surface and are driven with the same requests; the only thing that changes is
+which connection string the AppHost injects. [What actually differs](#what-actually-differs) is the
+short list of things that turned out not to be identical, measured rather than assumed.
 
 ## Cadence.Sample.Worker
 
@@ -20,19 +26,11 @@ hide packaging mistakes until the first real publish. This one found `NU5039` (a
 dotnet run --project samples/Cadence.Sample.Worker  # ctrl+c to stop
 ```
 
-### What it proves
-
-Progress a job reports fans out to three places, and the sample shows all three at once:
-
-| Path | What you see |
-|---|---|
-| **MEL** (`ILogger`) | `info: ...HelloThereJob[1] Hello there, Tony!` on the console |
-| **OTel logs** | the same record with `Body` still the template `Hello there, {Name}!`, `Name` as a structured attribute, `EventName` `Greeted`, and `JobName` / `RunId` / `InstanceId` as scope attributes |
-| **OTel traces** | a `cadence.job` span, tagged `job.name` / `job.run_id` / `job.trigger` / `job.scheduled_for` / `job.status`, carrying a `cadence.job.progress` event |
-| **OTel metrics** | `cadence.runs`, `cadence.run.duration`, `cadence.job.seconds_since_success` |
-| **Run history** | the dashboard's sink — in-memory here, since the dashboard itself is v0.4 |
-
-Verified output from a real run:
+Progress a job reports fans out to four places at once: **MEL** (`info: ...HelloThereJob[1] Hello
+there, Tony!`), **OTel logs** (the same record with `Body` still the template `Hello there, {Name}!`,
+`Name` a structured attribute, and `JobName` / `RunId` / `InstanceId` as scope attributes), **OTel
+traces**, and **OTel metrics** (`cadence.runs`, `cadence.run.duration`,
+`cadence.job.seconds_since_success`). The span is the one worth seeing whole:
 
 ```
 Activity.DisplayName:        cadence.job
@@ -49,43 +47,68 @@ Activity.Events:
         data.name: Tony
 ```
 
-### What it does not show
+**What it does not show: clustering.** In-memory stores and the no-op coordinator, deliberately —
+adding a store to it would blur both purposes. For clustering, read on.
 
-Clustering. This sample uses the in-memory stores and the no-op coordinator, deliberately: it exists
-to prove the telemetry fan-out on the zero-infrastructure path, and adding SQL to it would blur both
-purposes. For clustering, see the next sample.
+## The clustered pair
 
-## Cadence.Sample.AppHost
-
-.NET Aspire orchestrating a SQL Server container and **three replicas of one web host**. Each
-replica runs the tick loop, claims occurrences out of the shared database, *and* serves the v0.3
-control surface — `Cadence.Core`, `Cadence.Storage.Sql` and `Cadence.Api` composed into a single
-application, scaled by running more copies of it. That host is `Cadence.Sample.ClusteredWorker`;
-the AppHost is only what launches three of it.
+.NET Aspire orchestrating a store and **three replicas of one web host**. Each replica runs the tick
+loop, claims occurrences out of the shared store, *and* serves the v0.3 control surface — Core, a
+storage tier and `Cadence.Api` composed into a single application, scaled by running more copies of
+it. That host is `Cadence.Sample.ClusteredWorker`; an AppHost is only what launches three of it.
 
 **Why not a worker tier and an API tier.** `IJobTrigger.TriggerAsync` ends in
-`JobExecutor.DispatchAsync`, so a triggered run executes in the process that received the request.
-There is no cross-process dispatch — that would be a queue, and §7 #1 and #4 of the design plan cut
-queues on purpose. An API host over a different process's jobs therefore answers every trigger with
-`urn:cadence:problem:job-not-found`, which is exactly what an earlier version of this sample did.
-Design plan §13.6 states the conclusion: *the supported shape is every replica mapping the API*.
+`JobExecutor.DispatchAsync`, so a triggered run executes in the process that received the request —
+there is no cross-process dispatch, because that would be a queue and §7 #1 and #4 of the design plan
+cut queues on purpose. An API host over a different process's jobs answers every trigger with
+`urn:cadence:problem:job-not-found`, which an earlier version of this sample did. Design plan §13.6
+states the conclusion: *the supported shape is every replica mapping the API*.
 
-```powershell
-./scripts/pack.ps1                              # build the local feed
-dotnet run --project samples/Cadence.Sample.AppHost
+### One worker, two AppHosts
+
+The worker picks its storage tier from the connection string it was handed, and nothing else:
+
+| Connection string | Tier | Started by |
+|---|---|---|
+| `cadence-redis` | `UseRedisStorage()` | `Cadence.Sample.AppHost.Redis` |
+| `cadence-sql` | `UseSqlStorage()` | `Cadence.Sample.AppHost.Sql` |
+| neither | in-memory stores, no-op coordinator | `dotnet run` on the worker alone |
+
+It says which one it chose on the way up, and that line is how you know which sample you are looking
+at:
+
+```
+Cadence.Sample.ClusteredWorker[4] Replica worker-vfhvbscc joining the cluster on the SQL Server storage tier.
+Cadence.Sample.ClusteredWorker[4] Replica worker-npmdbedf joining the cluster on the Redis storage tier.
 ```
 
-Docker must be running; Aspire starts `mcr.microsoft.com/mssql/server:2022-latest` for you. The
-AppHost prints a dashboard URL with a login token — that dashboard is the UI here. Cadence tags
-every log record, span and metric with `JobName`, `RunId` and `InstanceId`, so "which replica ran
+The jobs, the endpoint wiring, the demo timings and the OTel setup therefore exist once, so "the two
+samples behave the same" is a fact about the code rather than a claim about two copies of it.
+
+### Running either one
+
+Docker must be running, and `./scripts/pack.ps1` first — the worker consumes `Cadence.Core`,
+`Cadence.Api`, `Cadence.Storage.Sql` and `Cadence.Storage.Redis` from the local feed, so it is also
+the check that all four pack correctly.
+
+```powershell
+./scripts/pack.ps1
+dotnet run --project samples/Cadence.Sample.AppHost.Sql      # dashboard on :17059
+dotnet run --project samples/Cadence.Sample.AppHost.Redis    # dashboard on :17060
+```
+
+The dashboard ports differ so both can run at once, which is how the comparison below was measured.
+Each AppHost prints its dashboard URL with a login token; that dashboard is the UI here, and Cadence
+tags every log record, span and metric with `JobName`, `RunId` and `InstanceId`, so "which replica ran
 what" is answerable without `Cadence.Dashboard`, which is v0.4.
 
-Two jobs run on every replica:
+Three jobs run on every replica:
 
 | Job | Cron | Triggers | What it is for |
 |---|---|---|---|
-| `tick-tock` | every 5s | `Schedule, Api` | one span per `job.scheduled_for` however many replicas are up — and the only job an HTTP trigger can start |
+| `tick-tock` | every 5s | `Schedule, Api` | one span per `job.scheduled_for` however many replicas are up |
 | `slow-sweep` | every 10s, takes 25s | `Schedule` | overruns its own slot, on purpose; refuses an API trigger, so the 400 is reachable |
+| `reindex-catalog` | none | `Api, Manual` | runs only when asked, so a triggered run cannot be mistaken for a scheduled one |
 
 ### The endpoint is proxied, and that is the point
 
@@ -94,12 +117,14 @@ port** — three replicas cannot all bind one, and the spread across replicas yo
 this sample's most useful demonstration. Read the port off the `worker` resource in the dashboard:
 
 ```powershell
-$b = 'http://localhost:54602'    # yours will differ
+$b = 'http://localhost:64934'    # yours will differ
 $t = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 ```
 
-`curl.exe` ships with Windows and prints non-2xx bodies. `Invoke-RestMethod` throws on them, and a
-401, a 404 and a 409 are half of what is worth seeing here. Every response below is from a real run.
+`curl.exe` ships with Windows and prints non-2xx bodies, where `Invoke-RestMethod` throws — and a
+401, a 404 and a 409 are half of what is worth seeing here. Every response below is from a real run;
+where the two tiers answered differently the difference is called out, and where they did not, one
+capture stands for both.
 
 The token is `Cadence:Api:Tokens` in the worker's `appsettings.Development.json` — 64 hex characters
 of `deadbeef`, the right *shape* and obviously not a secret. A real deployment generates one with
@@ -107,76 +132,55 @@ of `deadbeef`, the right *shape* and obviously not a secret. A real deployment g
 readable by anyone who can read `GET /pause`, so a guessable token can be confirmed offline without
 touching the service.
 
-#### 1. The gate, in two requests
+### 1. The gate, and the registry
 
 ```powershell
-curl.exe -s -i "$b/cadence/api/jobs"
-curl.exe -s -i -H "Authorization: Bearer $t" "$b/cadence/api/jobs"
+curl.exe -s -o NUL -w "%{http_code}`n" "$b/cadence/api/jobs"
+curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/jobs"
 ```
 
 ```
-HTTP/1.1 401 Unauthorized
-Content-Length: 0
+401
 ```
 
-```json
-[{"name":"tick-tock","cron":"*/5 * * * * *","timeZone":"UTC","enabled":true,"allowedTriggers":"Schedule, Api","nextOccurrenceUtc":"2026-08-27T06:05:40+00:00","lastRun":{"runId":"80c7d36c-0048-4e5b-9c16-c8c37d8c3ebe","jobName":"tick-tock","status":"Succeeded","trigger":"Schedule","instanceId":"worker-ndentyrm","scheduledForUtc":"2026-08-27T06:05:35+00:00","startedAtUtc":"2026-08-27T06:05:35.889+00:00","completedAtUtc":"2026-08-27T06:05:36.099+00:00","duration":"00:00:00.2020000"}},{"name":"slow-sweep","cron":"*/10 * * * * *","timeZone":"UTC","enabled":true,"allowedTriggers":"Schedule","nextOccurrenceUtc":"2026-08-27T06:05:40+00:00","lastRun":{"runId":"1ddae914-7a27-458c-8438-a776df4dc685","jobName":"slow-sweep","status":"Skipped","trigger":"Schedule","instanceId":"worker-ndentyrm","scheduledForUtc":"2026-08-27T06:05:30+00:00","startedAtUtc":"2026-08-27T06:05:30.903+00:00","completedAtUtc":"2026-08-27T06:05:30.903+00:00","duration":"00:00:00"}}]
+```
+name            cron           timeZone allowedTriggers nextOccurrenceUtc
+----            ----           -------- --------------- -----------------
+tick-tock       */5 * * * * *  UTC      Schedule, Api   2026-08-27 08:54:25
+slow-sweep      */10 * * * * * UTC      Schedule        2026-08-27 08:54:30
+reindex-catalog                UTC      Api, Manual
 ```
 
 The tree is policied as a group, so every route on it answers 401 without a token. A *wrong* token
 is also 401, not 403 — it never becomes an authenticated identity, so authorization is never
 reached. There is no `WWW-Authenticate` header on the way out; nothing in Cadence promises one.
 
-Note `"instanceId":"worker-ndentyrm"` in a response served by whichever replica the proxy picked.
-History is the cluster's; the registry is the process's.
+`reindex-catalog` has no cron, so its `cron` and `nextOccurrenceUtc` come back null: the shape a
+trigger-only job has on the wire. Each response also carries a `lastRun` with the `instanceId` that
+ran it — history is the cluster's, the registry is the process's.
 
-#### 2. Triggering a job the cluster actually runs
-
-```powershell
-curl.exe -s -i -X POST -H "Authorization: Bearer $t" "$b/cadence/api/jobs/tick-tock/trigger"
-```
-
-```
-HTTP/1.1 202 Accepted
-Content-Type: application/json; charset=utf-8
-
-{"runId":"21ef5774-84f6-4bf8-afc8-d892117c1a2d","jobName":"tick-tock","instanceId":"worker-ndentyrm"}
-```
-
-202 and not 201: the run has been *accepted*, and there is no resource to point at yet.
-
-This is the request that answered 404 in the previous shape, where the API was a separate process
-registering three jobs of its own and the replicas ran two others. Nothing in the database tells one
-host about another's code, and nothing hands a run across processes — so an API host that does not
-register `tick-tock` cannot start `tick-tock`, ever.
-
-#### 3. The ingress picks the instance, not Cadence
-
-§13.6's first consequence, and the thing the old shape could not show at all. Six triggers through
-the one proxied endpoint, half a second apart:
+### 2. Triggering, and who ends up running it
 
 ```powershell
 1..6 | ForEach-Object { curl.exe -s -X POST -H "Authorization: Bearer $t" "$b/cadence/api/jobs/tick-tock/trigger"; Start-Sleep -Milliseconds 500 }
 ```
 
 ```json
-{"runId":"3d45823b-01a0-4960-a326-9c6780dce82a","jobName":"tick-tock","instanceId":"worker-ehswtftx"}
-{"runId":"ef9753ae-f4d3-405a-846d-e818cbf206ef","jobName":"tick-tock","instanceId":"worker-vecqzbte"}
-{"runId":"123d8acb-f77d-4ba8-ab25-3b77fb371742","jobName":"tick-tock","instanceId":"worker-ndentyrm"}
-{"runId":"ba60120c-aea5-4fdb-85d5-78d8ec6b17e9","jobName":"tick-tock","instanceId":"worker-ndentyrm"}
-{"type":"urn:cadence:problem:run-skipped","title":"No run was started","status":409,"detail":"'tick-tock' was not started: A run of 'tick-tock' is already in flight on this instance and the overlap policy is Skip."}
-{"runId":"5359d201-7faf-4ea9-9231-078b175cb24d","jobName":"tick-tock","instanceId":"worker-ndentyrm"}
+{"runId":"dbdd35fe-e262-4db4-809d-ed85792a2abc","jobName":"tick-tock","instanceId":"worker-npmdbedf"}
+{"runId":"e161ef28-8ab1-452c-9bce-5ecd0bd946c5","jobName":"tick-tock","instanceId":"worker-dtmaxfrx"}
+{"runId":"51ce76ed-34ae-4668-af0a-fb86d53dac37","jobName":"tick-tock","instanceId":"worker-uevvqfhq"}
 ```
 
-Three different replicas, one unchanged request. Nothing chose them but the proxy — and it assigns
-per connection rather than per request, so run it again and the grouping changes. *Different
-replicas* is what holds; a rotation you can predict is not.
+202 and not 201: the run has been *accepted*, and there is no resource to point at yet. Three
+different replicas, one unchanged request — and nothing chose them but the proxy, which assigns per
+connection rather than per request. *Different replicas* is what holds; a rotation you can predict
+is not.
 
-The 409 is the same lesson from the other side: the fifth trigger landed on a replica whose 5-second
-occurrence was mid-flight, and `Skip` is evaluated **on this instance**, per process, not across the
-cluster.
+Occasionally one answers `409 urn:cadence:problem:run-skipped` instead: that trigger landed on a
+replica whose own 5-second occurrence was mid-flight, and `Skip` is evaluated **on this instance**,
+per process, not across the cluster.
 
-The contrast with scheduled runs is the whole thing in one table. Same job, same window:
+The contrast with scheduled runs is the whole thing in one table:
 
 ```powershell
 $runs = (curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs?job=tick-tock&limit=500" | ConvertFrom-Json).runs
@@ -186,16 +190,14 @@ $runs | Group-Object trigger, instanceId | Select-Object Count, Name | Sort-Obje
 ```
 Count Name
 ----- ----
-    7 Api, worker-ehswtftx
-    9 Api, worker-ndentyrm
-    7 Api, worker-vecqzbte
-  224 Schedule, worker-ndentyrm
-    2 Schedule, worker-vecqzbte
+    3 Api, worker-cnzansdk
+    3 Api, worker-jnhbmvbt
+   43 Schedule, worker-vfhvbscc
 ```
 
 Claiming elects one replica and keeps it. Triggering goes wherever the request landed.
 
-#### 4. One run per occurrence, still
+### 3. One run per occurrence
 
 The guarantee this sample has always existed to show, unchanged by the API being here. Count the
 scheduled runs, then count the slots they claim:
@@ -207,25 +209,34 @@ $scheduled = $runs | Where-Object trigger -eq 'Schedule'
 ```
 
 ```
-scheduled runs: 226   distinct slots: 226
+SQL     scheduled runs: 187   distinct slots: 187
+Redis   scheduled runs: 130   distinct slots: 130
 ```
 
-Equal, and they stay equal — through a pause, through the database being stopped and started under
-them, and through every trigger above. Three replicas all evaluate the same schedule every second
-and all three try to claim; the unique index on `CadenceJobRun` picks one. The same thing is visible
-in the dashboard: filter traces to `cadence.job` and group by `job.scheduled_for`.
+Equal on both tiers, and they stay equal — through a pause, through the store being stopped and
+started under them, and through every trigger above. Three replicas all evaluate the same schedule
+every second and all three try to claim; in SQL the unique index on `CadenceJobRun` picks one, in
+Redis a key only one caller can create does.
 
-**The winner does not rotate — and that is not load balancing.** 224 of those 226 slots went to one
-replica. Whichever replica started first has its tick phase a
-few tens of milliseconds ahead, and that is the whole race. The other two are failover capacity, not
-a share of the work. If you came here expecting three replicas to divide the load three ways, this
-is the sample correcting you — and §14.1 of the design plan is the architecture that would change
-it, recorded and deliberately not built.
+**The winner does not rotate — and that is not load balancing.** All 43 slots in the table above went
+to one replica. Whichever replica started first has its tick phase a few tens of milliseconds ahead,
+and that is the whole race; the other two are failover capacity, not a share of the work. If you came
+here expecting three replicas to divide the load three ways, this is the sample correcting you, and
+§14.1 of the design plan is the architecture that would change it — recorded, deliberately not built.
 
-The other 2 slots are the leader being *disturbed*, not the load spreading: one during the pause
-below, while the leader had stopped ticking and a replica had not yet polled the change, and one
-when the database came back after being stopped. Interrupt the leader and someone else wins the next
-slot immediately, which is the failover half of the same mechanism.
+Slots that go to a non-leader are the leader being *disturbed*: a pause it had already seen and the
+others had not, or the store going away and coming back. Over the same twelve pause-and-resume cycles
+the split came out differently on the two tiers:
+
+```
+SQL     183 worker-vfhvbscc    4 worker-cnzansdk
+Redis    95 worker-npmdbedf   20 worker-uevvqfhq   15 worker-dtmaxfrx
+```
+
+A leader keeps its lead only while the others are a fraction of a second behind. On Redis all three
+learn about a resume at once and genuinely race for the next slot; on SQL they learn at whatever phase
+their own poll timer is at. Suggestive rather than proven — one window, one machine — and either way
+the slot count never doubled.
 
 **The `Skip` caveat, live.** `slow-sweep` takes longer than the gap between its occurrences. Within
 one replica `Skip` is strict, so you will see runs recorded as `Skipped`. Across replicas it cannot
@@ -234,49 +245,35 @@ job?"* — so once the leader is busy, a different replica claims the next slot 
 first is still going. Two overlapping spans, same `job.name`, different `job.instance_id`. A job
 needing a hard cross-instance guarantee has to take its own lock.
 
-**The janitor reaping a dead replica.** Kill the winning replica *hard* — Task Manager, or
-`Stop-Process -Id <pid> -Force` — while a `slow-sweep` is in flight. Do not use the dashboard's Stop
-button: that is a graceful shutdown, so Cadence drains, records the run as `Aborted`, and deletes its
-registry row. There is nothing for the janitor to find.
+**The janitor reaping a dead replica.** Kill the winning replica *hard* — `Stop-Process -Id <pid>
+-Force` — while a `slow-sweep` is in flight. Not the dashboard's Stop button: that drains gracefully,
+records the run as `Aborted` and deletes the registry row, leaving nothing for the janitor to find.
+After a hard kill the heartbeat simply stops, and within `HeartbeatTimeout` plus one janitor pass the
+run flips from `Running` to `Lost` — a distinct status meaning *nobody recorded an outcome at all*,
+which is a different conversation with an operator than `Aborted`. Measured on SQL: killed at
+08:23:35 mid-sweep, marked `Lost` at 08:23:56, and the surviving replica had taken over by the next
+occurrence at 08:23:40.
 
-After a hard kill the heartbeat simply stops. Within `HeartbeatTimeout` plus one janitor pass the run
-flips from `Running` to `Lost` — a distinct status meaning *nobody recorded an outcome at all*, which
-is a different conversation with an operator than `Aborted`. Meanwhile the next-earliest replica
-starts winning claims immediately, and Aspire's proxy stops routing to the dead one.
-
-Measured on the run this sample was written against: killed at 08:23:35 mid-sweep, marked `Lost` at
-08:23:56, and the surviving replica had taken over by the next occurrence at 08:23:40.
-
-#### 5. Reading history, and the progress a run leaves behind
+### 4. Reading history, and the progress a run leaves behind
 
 ```powershell
-curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs?job=tick-tock&limit=2"
+curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs/62150202-ad02-4f7a-8ebf-64f9b2705b86"
 ```
 
 ```json
-{"runs":[{"runId":"011441a9-2464-4265-804f-c733e6754557","jobName":"tick-tock","status":"Succeeded","trigger":"Schedule","instanceId":"worker-ndentyrm","scheduledForUtc":"2026-08-27T06:17:00+00:00","startedAtUtc":"2026-08-27T06:17:00.895+00:00","completedAtUtc":"2026-08-27T06:17:01.117+00:00","duration":"00:00:00.2140000"},{"runId":"26fcdfc4-c27d-4975-9804-5c9091eb0968", ...}],"limit":2,"offset":0}
+{"run":{"runId":"62150202-ad02-4f7a-8ebf-64f9b2705b86","jobName":"tick-tock","status":"Succeeded","trigger":"Api","instanceId":"worker-uevvqfhq","startedAtUtc":"2026-08-27T06:56:12.0118188+00:00","completedAtUtc":"2026-08-27T06:56:12.2179599+00:00","duration":"00:00:00.2050000"},"log":[{"timestampUtc":"2026-08-27T06:56:12.0128964+00:00","message":"claimed and ran"}]}
 ```
 
-`limit` comes back so a caller can see what clamping happened; ask for 10000 and you get 500. Filter
-by `job`, `status`, `from`, `to`, `instance`, `limit` and `offset`. An API trigger is recorded as
-`Api` — not `Manual`, which is reserved for a dashboard button or an in-process call — and a
-triggered run carries no `scheduledForUtc` at all, because it belongs to no occurrence.
+That log entry is the job's `context.Report(...)` call, read back out of a store three processes
+write to. The by-id read is the only place progress appears, because a list view renders none and
+fetching it would be a second query per row.
 
-The by-id read is the only place progress appears, because a list view renders none and fetching it
-would be a second query per row:
+`GET /runs` filters by `job`, `status`, `from`, `to`, `instance`, `limit` and `offset`, and returns
+`limit` so a caller can see what clamping happened — ask for 10000 and you get 500. Note also what is
+*absent* above: an API trigger is recorded as `Api` rather than `Manual`, which is reserved for a
+dashboard button, and it carries no `scheduledForUtc` at all because it belongs to no occurrence.
 
-```powershell
-curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs/6fc5c966-ecce-44a4-9d86-ba8a60fa5fc8"
-```
-
-```json
-{"run":{"runId":"6fc5c966-ecce-44a4-9d86-ba8a60fa5fc8","jobName":"tick-tock","status":"Succeeded","trigger":"Api","instanceId":"worker-ehswtftx","startedAtUtc":"2026-08-27T06:09:23.936+00:00","completedAtUtc":"2026-08-27T06:09:24.15+00:00","duration":"00:00:00.2040000"},"log":[{"timestampUtc":"2026-08-27T06:09:23.945+00:00","message":"claimed and ran"}]}
-```
-
-That entry is the job's `context.Report(...)` call, read back out of a database three processes
-write to.
-
-#### 6. Pause: one HTTP call, every replica
+### 5. Pause: one HTTP call, every replica
 
 Pause is store-backed, so the request only has to reach *a* replica. Hold the schedule and leave
 triggers open — the shape of an actual incident:
@@ -289,40 +286,27 @@ curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/pause"
 
 ```
 HTTP/1.1 204 No Content
-```
-
-```json
-{"scope":"Schedule","reason":"payment gateway incident","setBy":"token:247d08f3","setAtUtc":"2026-08-27T06:07:12.942+00:00"}
+{"scope":"Schedule","reason":"payment gateway incident","setBy":"token:247d08f3","setAtUtc":"2026-08-27T06:54:28.313+00:00"}
 ```
 
 `setBy` is read from the authenticated principal, not from the request body — an audit trail cannot
 be written by the caller being audited. `token:247d08f3` is the first 8 hex of this token's SHA-256,
 stable across restarts.
 
-Watch the last scheduled occurrence stop moving. `tick-tock` is due every 5 seconds:
+Then watch the schedule stop moving. `tick-tock` is due every 5 seconds; on both tiers the last
+occurrence landed within two seconds of the PUT and nothing followed it for the next 25:
 
 ```
-06:07:12.9  PUT /pause {"scope":"Schedule"}  -> 204
-06:07:15    one last occurrence, on worker-vecqzbte      <- had not polled yet
-06:07:45    latest scheduled run: 06:07:15
-06:08:05    latest scheduled run: 06:07:15
+PUT at 06:54:28.290Z, then every 5s: latest scheduled occurrence 06:54:30Z, unchanged
 ```
 
-Two things to read there. The straggler at `06:07:15` ran on a *different* replica from the leader,
-which is the `SchedulePollInterval` — 5 seconds in this sample — visible as a real propagation
-delay. And then nothing: had the pause reached only the replica that served the PUT, one of the
-other two would have started winning the leader's abandoned slots. Silence on all three is the
-propagation.
+Had the pause reached only the replica that served the PUT, one of the other two would have started
+winning the leader's abandoned slots. Silence on all three is the propagation — and *how fast* they
+saw it is the one place these two samples measurably part company; see
+[What actually differs](#what-actually-differs).
 
-Triggers stay open the whole time, because the two switches are independent:
-
-```json
-{"runId":"8eaf81f7-8090-49ad-9cd3-8ddbd34d2cb5","jobName":"tick-tock","instanceId":"worker-ndentyrm"}
-{"runId":"616b3bcc-141c-40e4-822f-945da20c5975","jobName":"tick-tock","instanceId":"worker-ehswtftx"}
-```
-
-Close the other switch and the escape hatch shuts too. Give it a poll interval, then four triggers
-through the same proxied endpoint:
+Triggers stay open the whole time, because the two switches are independent. Close the other switch
+and the escape hatch shuts too:
 
 ```powershell
 curl.exe -s -o NUL -w "pause: %{http_code}`n" -X PUT -H "Authorization: Bearer $t" `
@@ -349,27 +333,29 @@ still carries the `setBy` and `setAtUtc` of whoever resumed: "nobody paused anyt
 resumed" are different facts.
 
 Single quotes around the JSON: PowerShell 7 passes that through to `curl.exe` intact, where the
-`-d '{\"scope\":...}'` form that PowerShell 5.1 needs sends literal backslashes instead.
+`-d '{\"scope\":...}'` form PowerShell 5.1 needs sends literal backslashes instead.
 
-#### 7. The refusals, as problem documents
+### 6. The refusals, as problem documents
 
 ```powershell
 curl.exe -s -X POST -H "Authorization: Bearer $t" "$b/cadence/api/jobs/no-such-job/trigger"
 curl.exe -s -X POST -H "Authorization: Bearer $t" "$b/cadence/api/jobs/slow-sweep/trigger"
 curl.exe -s -X PUT -H "Authorization: Bearer $t" -H "Content-Type: application/json" -d '{"scope":"Everything"}' "$b/cadence/api/pause"
+curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/runs/00000000-0000-0000-0000-000000000000"
 ```
 
 ```json
 {"type":"urn:cadence:problem:job-not-found","title":"Job not found","status":404,"detail":"No job is registered under the name 'no-such-job'."}
 {"type":"urn:cadence:problem:trigger-not-allowed","title":"Trigger not allowed","status":400,"detail":"'slow-sweep' cannot be triggered by Api. 'slow-sweep' allows Schedule."}
 {"type":"urn:cadence:problem:invalid-pause-scope","title":"Unknown pause scope","status":400,"detail":"'Everything' is not a pause scope. Use None, Schedule, Triggers or All."}
+{"type":"urn:cadence:problem:run-not-found","title":"Run not found","status":404,"detail":"No run is recorded under the id '00000000-0000-0000-0000-000000000000'."}
 ```
 
 404 for a name that does not exist, 400 for one that does but declares no `Api` trigger — no amount
 of retrying turns the second into a 202, which is what makes it that shape of 4xx. Every one is
 `application/problem+json` with a `urn:cadence:problem:` type, so a caller can branch on the type
-rather than parsing prose. `GET /runs/{id}` for an unknown id answers `urn:cadence:problem:run-not-found`
-the same way.
+rather than parsing prose. Byte-for-byte identical on both tiers, which is what you would hope: the
+problem documents are Core's, not the store's.
 
 The 404 is also how a misconfigured pod diagnoses itself. `MapCadenceApi()` does not throw on an
 empty registry — registering jobs behind a feature flag is legitimate — it warns at map time, and
@@ -379,77 +365,66 @@ One caveat: a *malformed* body is not Cadence's 400 but ASP.NET Core's, and in `
 means the developer exception page, which echoes the request headers, your `Authorization` line
 included. Not a reason to avoid it; a reason not to paste that output anywhere.
 
-#### 8. Health, including a store that is down
+### 7. Probes, storage health and Swagger
 
 ```powershell
-curl.exe -s -i "$b/health/live"                    # no token
-curl.exe -s -i "$b/cadence/api/health/storage"     # no token
+curl.exe -s -o NUL -w "%{http_code}`n" "$b/health/live"                    # no token
+curl.exe -s -o NUL -w "%{http_code}`n" "$b/cadence/api/health/storage"     # no token
 curl.exe -s -H "Authorization: Bearer $t" "$b/cadence/api/health/storage"
 ```
 
 ```
-HTTP/1.1 200 OK
-Content-Type: text/plain
-
-Healthy
-```
-
-```
-HTTP/1.1 401 Unauthorized
+200
+401
 ```
 
 ```json
-{"status":"Healthy","checks":[{"name":"cadence-sql","status":"Healthy","description":"The schedule database answered.","duration":"00:00:00.0046067"}]}
+SQL     {"status":"Healthy","checks":[{"name":"cadence-sql","status":"Healthy","description":"The schedule database answered.","duration":"00:00:00.0029771"}]}
+Redis   {"status":"Healthy","checks":[{"name":"cadence-redis","status":"Healthy","description":"Redis answered in 2 ms.","duration":"00:00:00.0041428"}]}
 ```
 
 `/health/live` and `/health/ready` are anonymous because a kubelet cannot present a token.
 `/cadence/api/health/storage` is inside the group and behind the gate, because it reports the last
-store error — operator information, not a probe.
+store error — operator information, not a probe. It is also the fastest way to confirm which sample
+you are talking to.
 
-Now take the database away — `docker stop` the `sql` container, or stop the resource from the
-dashboard — and ask the same three routes:
+Now take the store away — `docker stop` its container, or stop the resource from the dashboard — and
+ask again:
 
 ```
 /health/live               200 Healthy
 /health/ready              200
 /cadence/api/health/storage
 {"status":"Degraded","checks":[{"name":"cadence-sql","status":"Degraded","description":"The schedule
- database did not answer.","error":"Connection Timeout Expired.  The timeout period elapsed while
- attempting to consume the pre-login handshake acknowledgement. ...","duration":"00:00:11.7455250"}]}
+ database did not answer.","error":"Connection Timeout Expired. ...","duration":"00:00:11.7455250"}]}
 ```
 
-**That is the split working.** The store is gone, the storage report says so and names the error,
-and liveness stays 200 — because a storage blip that turned into a 503 on every replica at once
-would have the orchestrator restart the entire cluster during exactly the incident it should be
-riding out. Start the container again and the next check answers `Healthy` with no restart.
+**That is the split working.** The store is gone, the storage report says so and names the error, and
+liveness stays 200 — because a storage blip that turned into a 503 on every replica at once would
+have the orchestrator restart the entire cluster during exactly the incident it should be riding out.
+Start the container again and the next check answers `Healthy` with no restart.
 
-#### 9. Swagger, and the Authorize button
-
-`Development` gets an OpenAPI document at `/openapi/v1.json` and Swagger UI over it at `/swagger`.
-The document comes from the framework's `AddOpenApi()`; `Cadence.Api` declares each route's statuses
-and response shapes itself, so the schemas are the real ones.
-
-**Authorize** takes the token above — paste the value alone, Swagger UI adds the `Bearer` prefix:
+`Development` also gets an OpenAPI document at `/openapi/v1.json` and Swagger UI over it at
+`/swagger`. **Authorize** takes the token above — paste the value alone, Swagger UI adds the `Bearer`
+prefix:
 
 ```json
 {"CadenceToken":{"type":"http","description":"A token from Cadence:Api:Tokens or CADENCE_API_TOKEN. Paste the token alone; Swagger UI adds the Bearer prefix.","scheme":"bearer"}}
 ```
 
-That scheme comes from `OpenApiSecurity.cs` in this sample, not from the package: describing a
-security scheme means referencing `Microsoft.AspNetCore.OpenApi`, and `Cadence.Api` will not put
-that dependency on hosts that generate no document. Any host that wants the same button copies that
-file. The padlock is added per operation, from the authorization metadata `MapCadenceApi()` already
-stamped, so the gate's branches are read rather than re-decided.
+That scheme comes from `OpenApiSecurity.cs` in this sample, not from the package: describing one means
+referencing `Microsoft.AspNetCore.OpenApi`, and `Cadence.Api` will not put that dependency on hosts
+that generate no document. The padlock is added per operation from the authorization metadata
+`MapCadenceApi()` already stamped, so the gate's branches are read rather than re-decided.
 
-#### 10. The mapping gate refusing to start
+### 8. The mapping gate refusing to start
 
 The gate is a *startup* failure, on purpose: an operator meets it on deploy rather than a stranger
-meeting the open endpoint. `--no-launch-profile` drops the `Development` the launch profile sets,
-and `Production` does not load `appsettings.Development.json`, so no token is configured:
+meeting the open endpoint. `--no-launch-profile` drops the `Development` the launch profile sets, and
+`Production` does not load `appsettings.Development.json`, so no token is configured:
 
 ```powershell
-$env:ConnectionStrings__cadence = 'Server=localhost,1;Database=cadence;User Id=sa;Password=nope'
-dotnet run --project samples/Cadence.Sample.ClusteredWorker --no-launch-profile -- --environment Production
+dotnet run --project samples/Cadence.Sample.ClusteredWorker --no-launch-profile
 ```
 
 ```
@@ -461,8 +436,8 @@ CadenceApiOptions.AllowUnauthenticated.
    at Cadence.Api.CadenceApiEndpointExtensions.MapCadenceApi(IEndpointRouteBuilder endpoints)
 ```
 
-The process exits without ever listening, and it does so before the storage tier is contacted at all
-— which is why the connection string above only has to exist, not to work. Satisfy the gate with
+The process exits without ever listening, and no store is involved: this run has no connection
+string at all, so it is on the in-memory tier and the gate still stops it. Satisfy the gate with
 `$env:CADENCE_API_TOKEN = '<64 hex characters>'` and the same command gets past the map, logging
 which source supplied how many tokens and no value:
 
@@ -473,15 +448,72 @@ info: Cadence.Api[3002] Cadence's API accepted 1 token(s): 0 set in code, 0 from
 
 That is the line to read when a token that ought to work does not.
 
-### Editing a schedule by hand
+## What actually differs
 
-The dashboard that would do this properly is v0.4, so for now it is SQL — and there is one trap worth
-knowing. `CadenceJobSchedule` holds **overrides**, not a seeded copy of what the code declared, so a
-job running on its `[ScheduledJob]` cron has no row yet: you `INSERT`, you do not `UPDATE`.
+Everything above was driven against both samples with the same script, and steps 1 to 8 came back
+the same on both: same status codes, same problem documents, same `instanceId` spread, one run per
+occurrence on both. That is the claim worth making, and the conformance suite is what keeps it true.
 
-The second half matters more. Replicas do not poll the schedule table; they poll a single-row version
-counter, which is what keeps "nothing changed" cheap. `UpsertAsync` bumps it in the same transaction.
-A hand-written statement has to bump it too, or the edit sits in the table and nothing ever reads it:
+Four things did differ, and only the first is behaviour anyone would notice.
+
+### A pause reaches the replicas ~9× faster on Redis
+
+SQL polls a version counter every `SchedulePollInterval`; Redis publishes on a channel and polls only
+as a backstop (§11.3 — pub/sub has no redelivery, so a scheduler that had silently stopped noticing
+edits would look perfectly healthy). Pause rides the same counter (§12), so it inherits the
+difference.
+
+Measured the same way on both: hold the schedule, resume it, and time how long until the first
+scheduled occurrence lands. `tick-tock` is due every 5 seconds and `SchedulePollInterval` is 5
+seconds in both samples, so a replica that saw the resume at once catches the next boundary and one
+that has to poll can miss it.
+
+```
+SQL                                        Redis
+round 1:  14.0s later                      round 1:  1.2s later
+round 2:   1.0s later                      round 2:  0.8s later
+round 3:  10.9s later                      round 3:  0.8s later
+round 4:  10.9s later                      round 4:  0.8s later
+round 5:   1.0s later                      round 5:  0.8s later
+round 6:  10.9s later                      round 6:  0.7s later
+
+min 1.0s  max 14.0s  mean 8.1s             min 0.7s  max 1.2s  mean 0.9s
+```
+
+Redis caught the very next occurrence all six times. SQL caught it twice and missed it four times.
+The absolute numbers are quantised by the 5-second cron, so read them as "next boundary" versus
+"one or two boundaries later" rather than as latencies.
+
+### Timestamps come back at different precision
+
+`CadenceJobRun` stores `datetime2(3)`, so SQL rounds to the millisecond. Redis stores ticks and
+returns them, so a run's timestamps come back at .NET's full precision. Same run, same job, two
+tiers:
+
+```
+SQL     "startedAtUtc":"2026-08-27T06:54:27.643+00:00"
+Redis   "startedAtUtc":"2026-08-27T06:56:12.0118188+00:00"
+```
+
+Nothing in the API promises a precision, and no filter depends on one, but a client that
+round-trips the string and compares for equality would notice.
+
+### The storage health check names its own tier
+
+`cadence-sql` runs `SELECT 1` and answers *"The schedule database answered."*; `cadence-redis` runs
+`PING` and answers *"Redis answered in 2 ms."* — the Redis check reports the round trip in its
+description, the SQL one does not. Both are `Healthy` with a `duration`, and both go `Degraded` with
+the driver's error text when the store is gone.
+
+### Editing a schedule by hand is a different procedure
+
+The dashboard that would do this properly is v0.4, so for now it is the store's own tooling — and on
+both tiers there is the same trap: replicas do not poll the schedule table, they poll a single
+version counter, which is what keeps "nothing changed" cheap. A hand-written edit has to bump it too,
+or the edit sits there and nothing ever reads it.
+
+`CadenceJobSchedule` holds **overrides**, not a seeded copy of what the code declared, so a job
+running on its `[ScheduledJob]` cron has no row yet: you `INSERT`, you do not `UPDATE`.
 
 ```sql
 BEGIN TRANSACTION;
@@ -491,59 +523,120 @@ UPDATE CadenceScheduleVersion SET Version = Version + 1 WHERE Id = 1;
 COMMIT TRANSACTION;
 ```
 
-All three replicas pick it up within `SchedulePollInterval`, which this sample shortens to 5 seconds.
-Schedule writes are not on the API tree at all, and no sample can show them: a token may start work
-and stop it, while only a person changes *when* work happens.
-
-### Timings are demo values, not defaults
-
-The worker sets `HeartbeatInterval` 5s, `HeartbeatTimeout` 20s, `JanitorInterval` 15s and
-`SchedulePollInterval` 5s. The real defaults are 15s / 60s / 5min / 10s, which are right for a
-deployment and wrong for standing in front of a screen — the janitor demo would take five minutes.
-The relationship the defaults encode is preserved: the timeout is still four heartbeats, so one
-missed beat never gets a live replica's runs reaped out from under it.
-
-### It consumes Cadence as packages too
-
-Like `Cadence.Sample.Worker`, and for the same reason. This is also the only thing in the repository
-that consumes `Cadence.Storage.Sql` and `Cadence.Api` as NuGet packages rather than by project
-reference, so it is the check that those tiers pack correctly at all. Run `./scripts/pack.ps1` first,
-or the restore fails.
-
-The one exception is the AppHost's project reference to the worker, which is not consumption — it is
-how Aspire is told which project to launch, and what generates the `Projects.*` type.
-
-### Running it without any infrastructure
-
-There is no separate zero-infrastructure sample, because it is an edit rather than a project. Delete
-the `UseSqlStorage(...)` call and the connection-string lookup above it from
-`Cadence.Sample.ClusteredWorker/Program.cs` and `AddCadence` falls back to the in-memory stores and
-the no-op coordinator. `dotnet run` on the project alone then boots with no Docker and no database,
-and the whole control surface is still mounted on `http://localhost:5000`:
+Redis holds the same override as one field of a hash, its per-job version in a parallel hash, and the
+global counter as a plain key — and publishing is what makes it arrive in milliseconds rather than at
+the next poll:
 
 ```
-info: Cadence.Api[3002] Cadence's API accepted 1 token(s): 0 set in code, 1 from
-      Cadence:Api:Tokens, 0 from CADENCE_API_TOKEN.
+HSET   {cadence}:schedules tick-tock '{"CronExpression":"*/20 * * * * *","TimeZoneId":"UTC","Enabled":true}'
+HINCRBY {cadence}:schedules:rowver tick-tock 1
+INCR   {cadence}:schedules:version
+PUBLISH {cadence}:schedules:changed <the value INCR returned>
+```
+
+`HDEL` both fields, then bump and publish again, to drop back to the declared cron. Verified against
+the running sample: `GET /cadence/api/jobs` reported `*/20 * * * * *` on the first poll after the
+`PUBLISH`, and `*/5 * * * * *` again after the `HDEL`.
+
+Schedule writes are not on the API tree at all, and no sample can show them there: a token may start
+work and stop it, while only a person changes *when* work happens.
+
+### What did not differ, and one thing that cannot be seen from here
+
+The claim is represented differently — a row in `CadenceJobRun` on SQL, a key
+`{cadence}:occ:{job}:{ticks}` holding the winning run's id on Redis — but nothing observable depends
+on which. Both are permanent rather than expiring (§11.1), both are removed by the janitor with the
+run they belong to, and both produced exactly one run per occurrence over every window measured here.
+
+The difference that would actually decide a deployment is invisible in a sample: with Redis's default
+configuration a restart can lose recent writes, claims included, and an occurrence whose claim
+vanished can be claimed again. The root [README](../README.md#choosing-a-storage-tier) has the table;
+this sample cannot show it, because it would take killing Redis at the wrong microsecond.
+
+## Per-sample specifics
+
+Everything else about the two is shared. What is not:
+
+### Cadence.Sample.AppHost.Sql
+
+Starts `mcr.microsoft.com/mssql/server:2022-latest` as the resource `sql` and creates a database in
+it exposed as the connection string `cadence-sql`. Aspire generates the SA password and injects the
+whole connection string, so nothing is checked in and nothing is printable from the sample.
+`SqlSchemaInitializer` creates the tables on first boot; three replicas booting together all try, the
+first wins an application lock and the rest find nothing to do.
+
+The worker will not start at all if the database is unreachable, which is why the AppHost `WaitFor`s
+it.
+
+### Cadence.Sample.AppHost.Redis
+
+Starts `docker.io/library/redis` as the resource `cadence-redis`. Aspire 13.5 runs it with
+`--requirepass` and TLS on 6379 (plaintext stays on 6380), and hands the worker a
+StackExchange.Redis configuration string carrying both. **`UseRedisStorage()` takes it unchanged** —
+no reshaping, no parsing, no options to set; that was the one thing worth checking before building
+this sample.
+
+There is no schema step and no migrator: a key exists once something writes it. Which also means the
+worker starts with Redis unreachable, where the SQL worker cannot — `SqlSchemaInitializer` fails the
+host, while the Redis tier logs each failed operation and keeps ticking. Confirmed by pointing the
+worker at a closed port:
+
+```
+warn: Cadence.Storage.Redis.RedisScheduleSource[3102] Could not subscribe to schedule changes;
+      falling back to polling every 00:00:05. Edits will be picked up, just not immediately.
+```
+
+That is the poll backstop earning its keep. `AbortOnConnectFail` is also forced on by the tier
+whatever the connection string says, so an unreachable Redis throws rather than quietly queueing
+commands: reporting "someone else won" because Redis was down is the silent skipped run the
+coordinator contract forbids.
+
+To look inside, from the container so the password is never on your command line:
+
+```powershell
+docker exec <container> sh -c 'redis-cli -p 6380 -a "$REDIS_PASSWORD" --no-auth-warning KEYS "{cadence}:*"'
+```
+
+The `{cadence}:` prefix is a hash tag, so every key Cadence writes lands in one slot and the Lua
+scripts stay valid under Redis Cluster.
+
+## Notes on both
+
+**Timings are demo values, not defaults.** The worker sets `HeartbeatInterval` 5s,
+`HeartbeatTimeout` 20s, `JanitorInterval` 15s and `SchedulePollInterval` 5s — the same numbers on both
+tiers, so a difference between the samples can only come from the store. The real defaults are 15s /
+60s / 5min / 10s, right for a deployment and wrong for standing in front of a screen: the janitor demo
+would take five minutes. The relationship they encode holds either way — the timeout is four
+heartbeats, so one missed beat never gets a live replica's runs reaped out from under it.
+
+**Running with no infrastructure at all.** Hand the worker neither connection string and it falls
+back to the in-memory stores and the no-op coordinator. No Docker, no store, and the whole control
+surface still mounted on `http://localhost:5000`:
+
+```powershell
+dotnet run --project samples/Cadence.Sample.ClusteredWorker
+```
+
+```
+info: Cadence.Sample.ClusteredWorker[4] Replica SEBASTIANS:44916:1d70a814 joining the cluster on
+      the in-memory storage tier.
 info: Cadence.Scheduling.CadenceHostedService[1004] Cadence started on instance
-      SEBASTIANS:29648:9642c7ee with 2 job(s), ticking every 00:00:01.
+      SEBASTIANS:44916:1d70a814 with 3 job(s), ticking every 00:00:01.
 ```
 
-What you lose is everything this sample is about: run history becomes a per-process ring that empties
-on restart, every `instanceId` in every response is the same string, and there is no occurrence for
-anyone else to lose the race for.
+What you lose is everything the pair is about: run history becomes a per-process ring that empties on
+restart, every `instanceId` in every response is the same string, and there is no occurrence for
+anyone else to lose the race for. `GET /cadence/api/health/storage` answers
+`{"status":"Healthy","checks":[]}` — an empty list, because there is no store to check.
 
-### What it still cannot show
-
-A history view and schedule editing in a UI. Both are `Cadence.Dashboard`, which is v0.4. The Aspire
-dashboard covers live telemetry — logs, traces, metrics, per replica — but it reads OTel, not
-`CadenceJobRun`, so "what ran last Tuesday" is still a SQL query.
-
-The loopback filter, too. It engages on one branch of the gate — `Development`, no token, no policy,
-no `AllowUnauthenticated` — and reaching it means starting a host with the token blanked and bound
-off loopback, which is not a state this sample can be in while three replicas are talking to a
-database. Design plan §13.3 documents the branch and the 403 it answers with.
+**What the samples still cannot show.** A history view and schedule editing in a UI: both are
+`Cadence.Dashboard`, v0.4. The Aspire dashboard covers live telemetry per replica, but it reads OTel
+rather than run history, so "what ran last Tuesday" is still a store query. Nor the loopback filter,
+which engages on one branch of the gate — `Development`, no token, no policy, no
+`AllowUnauthenticated` — and needs a host bound off loopback with the token blanked, which is not a
+state these samples can be in. Design plan §13.3 documents the branch and the 403 it answers with.
 
 **The guarantee is also proven without any of this.** `ClusteredSchedulingTests` runs five instances
-against a Testcontainers SQL Server with a fake clock and asserts one run per occurrence, on every CI
-build, deterministically. This sample exists for what a test cannot do: real processes, real kills,
-real restarts, and something to look at.
+against a Testcontainers store with a fake clock and asserts one run per occurrence, on every CI
+build, deterministically, against both tiers. These samples exist for what a test cannot do: real
+processes, real kills, real restarts, and something to look at.
