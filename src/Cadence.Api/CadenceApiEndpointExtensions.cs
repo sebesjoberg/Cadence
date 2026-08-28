@@ -114,9 +114,9 @@ public static class CadenceApiEndpointExtensions
                 logger.OidcHasNoRequiredClaim();
             }
 
-            // A sibling group, because login has to answer a caller who has no ticket yet and /me
-            // authenticates its own caller: neither can sit behind the policy applied below.
-            AuthEndpoints.Map(endpoints.MapGroup($"{prefix}/auth"), CadenceApiDefaults.BasePath);
+            // Through the marker, because the dashboard's tree needs these same routes and either
+            // tree may be mounted first, or alone, or both.
+            AuthMapMarker.MapOnce(endpoints);
         }
 
         // A host policy governs alone when it names one. Otherwise the built-in policies are applied

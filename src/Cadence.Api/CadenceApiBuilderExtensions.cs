@@ -86,6 +86,11 @@ public static class CadenceApiBuilderExtensions
                 }
             });
 
+        // What keeps the sign-in routes to one mapping across the two trees. TryAdd, as with the key
+        // ring below: a second AddApi call has to resolve the same marker, or "mapped already" is
+        // answered by an instance nobody mapped through.
+        builder.Services.TryAddSingleton<AuthMapMarker>();
+
         ConfigureSignIn(builder.Services);
 
         builder.Services.AddAuthorization();

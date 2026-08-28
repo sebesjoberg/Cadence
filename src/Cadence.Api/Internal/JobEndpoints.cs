@@ -19,13 +19,31 @@ internal static class JobEndpoints
     /// <param name="requireOperate">Whether the trigger route requires Cadence's Operate policy.</param>
     public static void Map(IEndpointRouteBuilder group, bool requireOperate)
     {
+        MapReads(group);
+        MapTrigger(group, requireOperate);
+    }
+
+    /// <summary>Maps the reads, which every tree shares.</summary>
+    /// <param name="group">The group the tree mounts under.</param>
+    public static void MapReads(IEndpointRouteBuilder group)
+    {
         group.MapGet("/jobs", ListAsync)
             .Produces<IReadOnlyList<JobSummaryResponse>>();
 
         group.MapGet("/jobs/{name}", GetAsync)
             .Produces<JobDetailResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound);
+    }
 
+    /// <summary>
+    /// Maps the machine-callable trigger, which the reads are deliberately split from: this route
+    /// records <see cref="TriggerKind.Api"/>, and the dashboard's own has to record
+    /// <see cref="TriggerKind.Manual"/>.
+    /// </summary>
+    /// <param name="group">The group the tree mounts under.</param>
+    /// <param name="requireOperate">Whether the route requires Cadence's Operate policy.</param>
+    public static void MapTrigger(IEndpointRouteBuilder group, bool requireOperate)
+    {
         var trigger = group.MapPost("/jobs/{name}/trigger", TriggerAsync)
             .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)

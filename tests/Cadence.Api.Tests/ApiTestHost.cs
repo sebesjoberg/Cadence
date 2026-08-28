@@ -127,13 +127,15 @@ internal sealed class ApiTestHost : IAsyncDisposable
     /// properties a challenge carried instead of redirecting to a provider.
     /// </param>
     /// <param name="logs">Collects what the host logged.</param>
+    /// <param name="endpoints">Maps further routes, alongside the sign-in one.</param>
     public static Task<ApiTestHost> StartWithOidcAsync(
         Action<CadenceApiOptions>? configure = null,
         Action<IServiceCollection>? services = null,
         FakeApiTokenStore? store = null,
         OpenIdConnectConfiguration? discovery = null,
         bool recordChallenge = false,
-        LogCapture? logs = null)
+        LogCapture? logs = null,
+        Action<IEndpointRouteBuilder>? endpoints = null)
         => StartAsync(
             logs: logs,
             configure: options =>
@@ -175,29 +177,34 @@ internal sealed class ApiTestHost : IAsyncDisposable
 
                 services?.Invoke(collection);
             },
-            endpoints: routes => routes.MapGet(
-                SignInPath,
-                async (HttpContext context, string subject, string name, long? authTime, string? sid) =>
-                {
-                    var identity = TestUserHandler.UserIdentity(
-                        subject, name, CadenceApiDefaults.CookieScheme);
-
-                    if (authTime is { } seconds)
+            endpoints: routes =>
+            {
+                routes.MapGet(
+                    SignInPath,
+                    async (HttpContext context, string subject, string name, long? authTime, string? sid) =>
                     {
-                        identity.AddClaim(new Claim(
-                            "auth_time", seconds.ToString(CultureInfo.InvariantCulture)));
-                    }
+                        var identity = TestUserHandler.UserIdentity(
+                            subject, name, CadenceApiDefaults.CookieScheme);
 
-                    if (sid is not null)
-                    {
-                        identity.AddClaim(new Claim("sid", sid));
-                    }
+                        if (authTime is { } seconds)
+                        {
+                            identity.AddClaim(new Claim(
+                                "auth_time", seconds.ToString(CultureInfo.InvariantCulture)));
+                        }
 
-                    await context.SignInAsync(
-                        CadenceApiDefaults.CookieScheme, new ClaimsPrincipal(identity));
+                        if (sid is not null)
+                        {
+                            identity.AddClaim(new Claim("sid", sid));
+                        }
 
-                    return Results.NoContent();
-                }));
+                        await context.SignInAsync(
+                            CadenceApiDefaults.CookieScheme, new ClaimsPrincipal(identity));
+
+                        return Results.NoContent();
+                    });
+
+                endpoints?.Invoke(routes);
+            });
 
     /// <summary>Signs a user into the cookie scheme and carries the ticket on every later request.</summary>
     /// <param name="subject">The user's subject.</param>
