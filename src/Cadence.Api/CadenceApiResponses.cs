@@ -153,7 +153,12 @@ public sealed record AuthMeResponse(string Kind, string? Name, string? Subject, 
 /// <param name="Overlap">Overrides the job's declared overlap policy when set.</param>
 /// <param name="MaxDuration">Overrides the job's declared maximum duration when set.</param>
 /// <param name="Settings">Arbitrary per-job settings, replacing whatever is stored.</param>
-/// <param name="Version">The version the editor loaded, for optimistic concurrency.</param>
+/// <param name="Version">
+/// The version the editor loaded, for optimistic concurrency. <c>0</c> asks to overwrite whatever
+/// is stored, which is what a first write has and what the storage tier reads as "I did not load
+/// this row". Omitting it is refused with 409 where a row already exists, so that forgetting the
+/// field cannot silently become last-write-wins.
+/// </param>
 public sealed record ScheduleWriteRequest(
     string CronExpression,
     string TimeZoneId,
@@ -161,11 +166,14 @@ public sealed record ScheduleWriteRequest(
     string? Overlap,
     TimeSpan? MaxDuration,
     IReadOnlyDictionary<string, string>? Settings,
-    int Version);
+    int? Version);
 
-/// <summary>A stored schedule, as the editor reloads it.</summary>
+/// <summary>
+/// A schedule as the editor loads and reloads it: the stored row, or — where no row exists yet —
+/// what the job declares in code, at version zero.
+/// </summary>
 /// <param name="JobName">The job this configuration belongs to.</param>
-/// <param name="CronExpression">Cron expression, as stored.</param>
+/// <param name="CronExpression">Cron expression, empty for a job that declares none.</param>
 /// <param name="TimeZoneId">The zone the expression is evaluated in, as the host resolved it.</param>
 /// <param name="Enabled">Whether the scheduler acts on this schedule.</param>
 /// <param name="Overlap">The overlap override, or null when the job's own declaration stands.</param>

@@ -12,44 +12,84 @@ using Microsoft.Extensions.Logging;
 namespace Cadence.Api.Internal;
 
 /// <summary>
-/// The schedule write, which the machine-callable tree deliberately does not carry: a triggered run
-/// is loud and over, a changed cron expression is silent and permanent, so only a person edits one.
+/// Read and edit one job's schedule. The machine-callable tree carries neither: §13.2 draws the
+/// line at a token being able to start work and stop work, and only a person being able to change
+/// when work happens.
 /// </summary>
 internal static class ScheduleEndpoints
 {
+    private const string Route = "/jobs/{name}/schedule";
+
     /// <summary>Recorded when nothing authenticated the caller, so the audit line is never blank.</summary>
     private const string AnonymousCaller = "api";
 
     /// <summary>Recorded when the source held no row, so the audit line reads as prose either way.</summary>
     private const string NoPreviousSchedule = "(none)";
 
-    /// <summary>Maps the schedule write onto an already-policied group.</summary>
+    /// <summary>Maps the schedule pair onto an already-policied group.</summary>
     /// <param name="group">The group the operator tree mounts under.</param>
-    /// <param name="requireOperate">Whether the write requires Cadence's Operate policy.</param>
-    public static void Map(IEndpointRouteBuilder group, bool requireOperate)
+    /// <param name="requireUserPrincipal">
+    /// Whether the pair requires a user principal on top of the group's own policy. False under a
+    /// host-named policy, which governs alone -- the rule <c>TokenEndpoints</c> already follows.
+    /// </param>
+    public static void Map(IEndpointRouteBuilder group, bool requireUserPrincipal)
     {
-        var write = group.MapPut("/jobs/{name}/schedule", PutAsync)
+        var read = group.MapGet(Route, GetAsync)
+            .Produces<ScheduleResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        var write = group.MapPut(Route, PutAsync)
             .Produces<ScheduleResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
 
-        // The pause write's rule, for a heavier write: the group's own policy admits a read-scoped
-        // token, and a leaked monitoring credential must not be able to move when work happens.
-        if (requireOperate)
+        if (!requireUserPrincipal)
         {
-            write.RequireAuthorization(CadenceTokenDefaults.OperatePolicy)
+            return;
+        }
+
+        // The read is gated with the write: the version it hands out is only useful to whoever may
+        // spend it.
+        foreach (var route in (RouteHandlerBuilder[])[read, write])
+        {
+            route.AddEndpointFilter<UserPrincipalFilter>()
                 .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
         }
+    }
+
+    private static async Task<Results<JsonHttpResult<ScheduleResponse>, JsonHttpResult<ProblemDetails>>> GetAsync(
+        string name,
+        IJobRegistry registry,
+        IWritableScheduleSource schedules,
+        CancellationToken cancellationToken)
+    {
+        if (!registry.TryGet(name, out var descriptor) || descriptor is null)
+        {
+            return ProblemMapper.AsResult(ProblemMapper.JobNotFound(name, registry.All.Count));
+        }
+
+        var stored = await schedules.GetAsync(name, cancellationToken);
+
+        return TypedResults.Json(
+            Responses.ToSchedule(stored ?? Declared(descriptor)),
+            CadenceApiJsonContext.Default.ScheduleResponse);
     }
 
     private static async Task<Results<JsonHttpResult<ScheduleResponse>, JsonHttpResult<ProblemDetails>>> PutAsync(
         string name,
         ScheduleWriteRequest request,
         ClaimsPrincipal user,
+        IJobRegistry registry,
         IWritableScheduleSource schedules,
         ILoggerFactory loggers,
         CancellationToken cancellationToken)
     {
+        if (!registry.TryGet(name, out _))
+        {
+            return ProblemMapper.AsResult(ProblemMapper.JobNotFound(name, registry.All.Count));
+        }
+
         // Parsed here rather than at the next tick: an expression that reaches the loop unparseable
         // would throw once a second forever, and nobody would be left to tell about it.
         if (!CronParser.TryParse(request.CronExpression, out _, out _))
@@ -67,7 +107,7 @@ internal static class ScheduleEndpoints
         if (request.Overlap is { } declared)
         {
             // Enum.TryParse also accepts bare numbers, so IsDefined is what keeps a policy no member
-            // defines out of the row rather than storing it and dropping it at read time.
+            // defines out of the row.
             if (!Enum.TryParse<OverlapPolicy>(declared, ignoreCase: true, out var parsed) ||
                 !Enum.IsDefined(parsed))
             {
@@ -77,7 +117,17 @@ internal static class ScheduleEndpoints
             overlap = parsed;
         }
 
+        if (request.MaxDuration is { } maxDuration && maxDuration <= TimeSpan.Zero)
+        {
+            return ProblemMapper.AsResult(ProblemMapper.InvalidMaxDuration(maxDuration));
+        }
+
         var previous = await schedules.GetAsync(name, cancellationToken);
+
+        if (previous is not null && request.Version is null)
+        {
+            return ProblemMapper.AsResult(ProblemMapper.MissingScheduleVersion(name));
+        }
 
         var schedule = new JobSchedule
         {
@@ -90,7 +140,7 @@ internal static class ScheduleEndpoints
             Overlap = overlap,
             MaxDuration = request.MaxDuration,
             Settings = request.Settings ?? ImmutableDictionary<string, string>.Empty,
-            Version = request.Version,
+            Version = request.Version ?? 0,
         };
 
         try
@@ -110,13 +160,23 @@ internal static class ScheduleEndpoints
             previous?.CronExpression ?? NoPreviousSchedule,
             schedule.CronExpression);
 
-        // Read back, so the version the editor holds is the store's and not the one it sent -- that
-        // is what makes its next write safe. A source that cannot read its own write back has
-        // nothing better to offer than what we sent it.
+        // Read back, so the version the editor holds is the store's and not the one it sent.
         var stored = await schedules.GetAsync(name, cancellationToken) ?? schedule;
 
         return TypedResults.Json(
             Responses.ToSchedule(stored),
             CadenceApiJsonContext.Default.ScheduleResponse);
     }
+
+    /// <summary>What the job declares in code, for a job the source holds no row for yet.</summary>
+    /// <param name="descriptor">The registered job.</param>
+    private static JobSchedule Declared(JobDescriptor descriptor) => new()
+    {
+        JobName = descriptor.Name,
+        CronExpression = descriptor.DefaultCron ?? string.Empty,
+        TimeZoneId = descriptor.DefaultTimeZone.Id,
+        Enabled = descriptor.DefaultEnabled,
+        Overlap = descriptor.Overlap,
+        MaxDuration = descriptor.MaxDuration,
+    };
 }

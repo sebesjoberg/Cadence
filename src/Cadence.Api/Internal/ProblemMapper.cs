@@ -26,12 +26,7 @@ internal static class ProblemMapper
         JobNotFoundException ex => JobNotFound(ex.JobName),
         TriggerNotAllowedException ex => Problem(400, "trigger-not-allowed", "Trigger not allowed", ex.Message),
         SchedulerPausedException ex => Problem(409, "scheduler-paused", "Triggers are paused", ex.Message),
-        ScheduleConflictException ex => Problem(
-            409,
-            "schedule-conflict",
-            "Schedule was modified",
-            $"The schedule for '{Echo(ex.JobName)}' moved since the editor loaded it. Reload it and " +
-            "reapply the change."),
+        ScheduleConflictException ex => ScheduleConflict(ex.JobName),
         _ => null,
     };
 
@@ -49,11 +44,20 @@ internal static class ProblemMapper
 
     /// <summary>Describes a name that matches no registered job.</summary>
     /// <param name="jobName">The name that was not found.</param>
-    public static ProblemDetails JobNotFound(string jobName) => Problem(
+    /// <param name="registered">
+    /// How many jobs this replica has, where the caller knows. §13.6: a replica that serves the
+    /// dashboard and registers no jobs answers 404 to every name, and a count of zero is what says
+    /// so from the response body rather than from somebody's deployment diagram.
+    /// </param>
+    public static ProblemDetails JobNotFound(string jobName, int? registered = null) => Problem(
         404,
         "job-not-found",
         "Job not found",
-        $"No job is registered under the name '{jobName}'.");
+        $"No job is registered under the name '{jobName}'."
+        + (registered is { } count
+            ? $" This replica has {count} registered job(s); a replica that hosts only the " +
+              "dashboard has none."
+            : string.Empty));
 
     /// <summary>Describes a pause scope that names no combination of the defined flags.</summary>
     /// <param name="scope">The scope as the caller wrote it.</param>
@@ -155,6 +159,41 @@ internal static class ProblemMapper
         "invalid-overlap-policy",
         "Unknown overlap policy",
         $"overlap: '{Echo(overlap)}' is not an overlap policy. Use Skip or AllowConcurrent.");
+
+    /// <summary>
+    /// Describes a maximum duration that is not positive — the rule <c>[ScheduledJob]</c> and
+    /// <c>JobBuilder.MaxDuration</c> enforce at startup, on the third way into a schedule. Zero
+    /// cancels every run the instant it begins, and a negative value throws inside the executor.
+    /// </summary>
+    /// <param name="maxDuration">The duration as the caller wrote it.</param>
+    public static ProblemDetails InvalidMaxDuration(TimeSpan maxDuration) => Problem(
+        400,
+        "invalid-max-duration",
+        "Invalid maximum duration",
+        $"maxDuration: {maxDuration} is not positive. Omit it for no limit, or use a form like " +
+        "'00:10:00'.");
+
+    /// <summary>Describes a schedule write that lost its optimistic-concurrency check.</summary>
+    /// <param name="jobName">The job whose schedule could not be written.</param>
+    public static ProblemDetails ScheduleConflict(string jobName) => Problem(
+        409,
+        "schedule-conflict",
+        "Schedule was modified",
+        $"The schedule for '{Echo(jobName)}' moved since the editor loaded it. Reload it and " +
+        "reapply the change.");
+
+    /// <summary>
+    /// Describes a write over an existing row that sent no version. Refused rather than defaulted:
+    /// the storage tier reads version zero as "just make it so", so accepting the omission would
+    /// make forgetting the field indistinguishable from asking for last-write-wins.
+    /// </summary>
+    /// <param name="jobName">The job whose schedule was being written.</param>
+    public static ProblemDetails MissingScheduleVersion(string jobName) => Problem(
+        409,
+        "schedule-conflict",
+        "Schedule version required",
+        $"A schedule for '{Echo(jobName)}' is already stored, so the write must carry the version " +
+        "it was loaded at. Send that version, or send 0 to overwrite whatever is there.");
 
     /// <summary>Describes a token id that matches nothing revocable.</summary>
     /// <param name="id">The id that matched nothing.</param>

@@ -3,7 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Cadence.Api.Routing;
 using Cadence.Storage;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -11,8 +13,8 @@ using Xunit;
 namespace Cadence.Api.Tests;
 
 /// <summary>
-/// The write the machine tree deliberately does not carry: a triggered run is loud and over, a
-/// changed cron expression is silent and permanent, so only the operator tree edits one.
+/// §13.2's dividing line, as the operator tree implements it: a token can start work and stop work,
+/// and only a person can change when work happens.
 /// </summary>
 public sealed class ScheduleEndpointTests
 {
@@ -21,10 +23,18 @@ public sealed class ScheduleEndpointTests
     private const string SchedulePath =
         CadenceApiDefaults.UiPath + "/jobs/" + JobName + "/schedule";
 
+    private const string RoutePattern = "/jobs/{name}/schedule";
+
+    /// <summary>The audit line's event id. Cadence.Api owns 3000-3007; 3200+ is the dashboard's.</summary>
+    private const int AuditEventId = 3007;
+
     /// <summary>The seeded row's expression, which the audit line has to report as the old one.</summary>
     private const string OldCron = "0 3 * * *";
 
     private const string NewCron = "0 0 4 * * *";
+
+    /// <summary>The signed-in person every write here is made by, and the name the audit records.</summary>
+    private const string Operator = "Ada Lovelace";
 
     private static readonly CadenceUiMapOptions Open =
         new() { CookiePolicy = false, LoopbackOnly = false };
@@ -82,6 +92,34 @@ public sealed class ScheduleEndpointTests
         Assert.Equal("500", written.Settings["batch"]);
     }
 
+    [Fact]
+    public async Task ReadsTheStoredScheduleSoTheEditorHasAVersionToSpend()
+    {
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 7));
+
+        await using var host = await StartAsync(source);
+
+        var schedule = await host.Client.GetFromJsonAsync<ScheduleResponse>(SchedulePath);
+
+        Assert.Equal(OldCron, schedule!.CronExpression);
+        Assert.Equal(7, schedule.Version);
+    }
+
+    [Fact]
+    public async Task ReadsTheCodeDeclaredScheduleWhereTheSourceHoldsNoRow()
+    {
+        // Version zero, which is what the write then reads as "there was nothing here".
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await StartAsync(source);
+
+        var schedule = await host.Client.GetFromJsonAsync<ScheduleResponse>(SchedulePath);
+
+        Assert.Equal(ApiTestJobs.NightlyCron, schedule!.CronExpression);
+        Assert.Equal(0, schedule.Version);
+    }
+
     [Theory]
     [InlineData("not a cron", "UTC", "invalid-cron", "cronExpression")]
     [InlineData(NewCron, "Mars/Olympus", "unknown-time-zone", "timeZoneId")]
@@ -119,6 +157,26 @@ public sealed class ScheduleEndpointTests
         Assert.Null(source.Last);
     }
 
+    // Zero cancels every run the instant it begins and a negative value throws inside the executor,
+    // so this route enforces what [ScheduledJob] and JobBuilder.MaxDuration enforce at startup.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task RefusesAMaxDurationThatIsNotPositive(int minutes)
+    {
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { MaxDuration = TimeSpan.FromMinutes(minutes) });
+
+        var problem = await RefusalAsync(response, HttpStatusCode.BadRequest);
+
+        Assert.Equal("urn:cadence:problem:invalid-max-duration", problem.Type);
+        Assert.Null(source.Last);
+    }
+
     [Fact]
     public async Task AStaleVersionIsAConflict()
     {
@@ -127,7 +185,8 @@ public sealed class ScheduleEndpointTests
 
         await using var host = await StartAsync(source);
 
-        var response = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron) with { Version = 3 });
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { Version = 3 });
 
         var problem = await RefusalAsync(response, HttpStatusCode.Conflict);
 
@@ -136,13 +195,72 @@ public sealed class ScheduleEndpointTests
     }
 
     [Fact]
+    public async Task AWriteOverAStoredRowWithoutAVersionIsAConflict()
+    {
+        // Both storage tiers read version zero as "just make it so", so defaulting an absent field
+        // to zero would make forgetting it indistinguishable from asking for last-write-wins.
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 4));
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { Version = null });
+
+        var problem = await RefusalAsync(response, HttpStatusCode.Conflict);
+
+        Assert.Equal("urn:cadence:problem:schedule-conflict", problem.Type);
+        Assert.Null(source.Last);
+    }
+
+    [Fact]
+    public async Task AFirstWriteNeedsNoVersion()
+    {
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { Version = null });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(NewCron, source.Last!.CronExpression);
+    }
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("PUT")]
+    public async Task AnUnregisteredJobIsNotFoundAndTheDetailSaysHowManyThereAre(string method)
+    {
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await StartAsync(source);
+
+        const string Path = CadenceApiDefaults.UiPath + "/jobs/nothing-declares-this/schedule";
+
+        var response = method == "GET"
+            ? await host.Client.GetAsync(Path)
+            : await host.Client.PutAsJsonAsync(Path, Edit(NewCron));
+
+        var problem = await RefusalAsync(response, HttpStatusCode.NotFound);
+
+        Assert.Equal("urn:cadence:problem:job-not-found", problem.Type);
+
+        // §13.6: a replica that serves the dashboard and registers no jobs 404s every name, and the
+        // count is what tells an operator that from the response body.
+        Assert.Contains("registered job(s)", problem.Detail!, StringComparison.Ordinal);
+        Assert.Null(source.Last);
+    }
+
+    [Fact]
     public async Task TheRouteIsAbsentWithoutAWritableSource()
     {
-        // 404 from routing, not a handler that mounted and then apologised: a deployment on a
-        // read-only source has no schedule write to reach.
-        await using var host = await ApiTestHost.StartAsync(
-            configure: api => api.AllowUnauthenticated = true,
-            endpoints: routes => CadenceUiRoutes.Map(routes, Open));
+        // 404 from routing to a signed-in person, not 403: a deployment on a read-only source has
+        // no schedule write to reach at all.
+        await using var host = await ApiTestHost.StartWithOidcAsync(
+            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
+
+        await SignInAsync(host);
 
         var response = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron));
 
@@ -150,16 +268,41 @@ public sealed class ScheduleEndpointTests
     }
 
     [Fact]
-    public async Task AReadTokenCannotChangeTheSchedule()
+    public async Task TheMachineTreeNeverMountsTheScheduleRoutes()
     {
-        // The tree's own policy admits a read-scoped token, so without Operate on the write a leaked
-        // monitoring credential could move when work happens -- silently, and permanently.
+        // The milestone's defining rule: a changed cron expression is silent and permanent, so the
+        // machine-callable tree carries no schedule route however the storage tier is configured.
+        IReadOnlyList<Endpoint> built = [];
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await ApiTestHost.StartAsync(
+            configure: api => api.AllowUnauthenticated = true,
+            services: collection => Register(collection, source),
+            endpoints: routes =>
+            {
+                CadenceUiRoutes.Map(routes, Open);
+                built = [.. routes.DataSources.SelectMany(dataSource => dataSource.Endpoints)];
+            });
+
+        var patterns = built.OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .ToArray();
+
+        Assert.Contains(CadenceApiDefaults.UiPath + RoutePattern, patterns);
+        Assert.DoesNotContain(CadenceApiDefaults.ApiPath + RoutePattern, patterns);
+    }
+
+    [Fact]
+    public async Task AnOperateTokenCannotChangeTheSchedule()
+    {
+        // The strongest scope a token can hold, and it is still not a person. Operate is what pause
+        // and trigger take; §13.2 puts changing when work happens on the other side of the line.
         var source = new FakeWritableScheduleSource();
         var tokens = new FakeApiTokenStore();
         var (secret, digest) = ApiTokenSecret.Create();
 
         await tokens.CreateAsync(
-            new ApiTokenCreation("monitoring", ApiTokenScope.Read, null, null, null), digest, default);
+            new ApiTokenCreation("deploy", ApiTokenScope.Operate, null, null, null), digest, default);
 
         await using var host = await ApiTestHost.StartWithOidcAsync(
             services: collection => Register(collection, source),
@@ -169,9 +312,13 @@ public sealed class ScheduleEndpointTests
         host.Client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", secret);
 
-        var response = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron));
+        var write = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron));
+        var read = await host.Client.GetAsync(SchedulePath);
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
+
+        // The read is gated with the write: a version is only useful to whoever may spend it.
+        Assert.Equal(HttpStatusCode.Forbidden, read.StatusCode);
         Assert.Null(source.Last);
     }
 
@@ -182,25 +329,39 @@ public sealed class ScheduleEndpointTests
         var source = new FakeWritableScheduleSource();
         source.Seed(Stored(version: 0));
 
-        await using var host = await ApiTestHost.StartWithOidcAsync(
-            services: collection => Register(collection, source),
-            logs: logs,
-            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
-
-        await host.SignInAsync("u1", "Ada Lovelace");
-        host.Client.DefaultRequestHeaders.Add(CadenceApiDefaults.SessionHeader, "1");
+        await using var host = await StartAsync(source, logs: logs);
 
         var response = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var audit = Assert.Single(logs.Records, record => record.EventId == 3210);
+        var audit = Assert.Single(logs.Records, record => record.EventId == AuditEventId);
 
         Assert.Equal(LogLevel.Information, audit.Level);
         Assert.Contains(JobName, audit.Message, StringComparison.Ordinal);
-        Assert.Contains("Ada Lovelace", audit.Message, StringComparison.Ordinal);
+        Assert.Contains(Operator, audit.Message, StringComparison.Ordinal);
         Assert.Contains(OldCron, audit.Message, StringComparison.Ordinal);
         Assert.Contains(NewCron, audit.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARefusedWriteIsNotAudited()
+    {
+        // The audit line answers "what changed"; a refusal changed nothing, and a log that says
+        // otherwise is worse than no log.
+        var logs = new LogCapture();
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 4));
+
+        await using var host = await StartAsync(source, logs: logs);
+
+        var invalid = await host.Client.PutAsJsonAsync(SchedulePath, Edit("not a cron"));
+        var stale = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { Version = 3 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.DoesNotContain(logs.Records, record => record.EventId == AuditEventId);
     }
 
     private static ScheduleWriteRequest Edit(string cron, string zone = "UTC") =>
@@ -227,11 +388,28 @@ public sealed class ScheduleEndpointTests
         return problem;
     }
 
-    private static Task<ApiTestHost> StartAsync(FakeWritableScheduleSource source)
-        => ApiTestHost.StartAsync(
-            configure: api => api.AllowUnauthenticated = true,
+    /// <summary>
+    /// The dashboard's own shape: a signed-in person on the cookie tree. Every route here needs one,
+    /// because they require a user principal rather than a scope a token could hold.
+    /// </summary>
+    private static async Task<ApiTestHost> StartAsync(
+        FakeWritableScheduleSource source, LogCapture? logs = null)
+    {
+        var host = await ApiTestHost.StartWithOidcAsync(
             services: collection => Register(collection, source),
-            endpoints: routes => CadenceUiRoutes.Map(routes, Open));
+            logs: logs,
+            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
+
+        await SignInAsync(host);
+
+        return host;
+    }
+
+    private static async Task SignInAsync(ApiTestHost host)
+    {
+        await host.SignInAsync("u1", Operator);
+        host.Client.DefaultRequestHeaders.Add(CadenceApiDefaults.SessionHeader, "1");
+    }
 
     // Both interfaces, as a storage package registers them: the gate reads the writable one and the
     // rest of the surface reads the schedules through the other.
