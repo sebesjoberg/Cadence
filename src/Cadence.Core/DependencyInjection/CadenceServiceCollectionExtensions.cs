@@ -87,6 +87,7 @@ public static class CadenceServiceCollectionExtensions
         services.TryAddSingleton<IOccurrenceCoordinator, NoOpOccurrenceCoordinator>();
         services.TryAddSingleton<IPauseStore, InMemoryPauseStore>();
         services.TryAddSingleton<IApiTokenStore, ConfiguredApiTokenStore>();
+        services.TryAddSingleton<IInstanceDirectory, InMemoryInstanceDirectory>();
         services.TryAddSingleton<IJobProgressSink, RunHistoryProgressSink>();
 
         services.TryAddSingleton<CadenceMetrics>();
