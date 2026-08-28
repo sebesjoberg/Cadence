@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Cadence.Storage.Conformance;
+using Cadence.Storage.Redis.Internal;
 using Testcontainers.Redis;
 using Xunit;
 
@@ -91,6 +93,38 @@ public sealed class RedisFixture : IAsyncLifetime
         options.Validate();
 
         return options;
+    }
+
+    /// <summary>
+    /// Writes the same hash and sorted-set entries <see cref="RedisInstanceRegistry"/> writes, so a
+    /// test controls heartbeats itself rather than waiting on its background loop.
+    /// </summary>
+    /// <param name="options">The key space to write into.</param>
+    /// <param name="instance">The values to write.</param>
+    /// <param name="cancellationToken">Unused; StackExchange.Redis calls do not take one.</param>
+    public static async Task WriteInstanceAsync(
+        RedisStorageOptions options,
+        InstanceInfo instance,
+        CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+
+        await using var connection = new RedisConnection(options);
+        var keys = connection.Keys;
+        var database = await connection.GetDatabaseAsync();
+
+        var details = JsonSerializer.Serialize(new
+        {
+            instance.MachineName,
+            instance.ProcessId,
+            instance.AssemblyVersion,
+            StartedAtUtc = RedisValues.Ticks(instance.StartedAtUtc),
+        });
+
+        await database.HashSetAsync(keys.Instances, instance.InstanceId, details);
+
+        await database.SortedSetAddAsync(
+            keys.Heartbeats, instance.InstanceId, RedisValues.Ticks(instance.LastHeartbeatUtc));
     }
 
     private static string Sanitise(string label)
