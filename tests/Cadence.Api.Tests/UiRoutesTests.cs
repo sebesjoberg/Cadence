@@ -53,7 +53,7 @@ public sealed class UiRoutesTests
     }
 
     [Fact]
-    public async Task TheOperatorTreeMountsTheReadsAndNotTheTrigger()
+    public async Task TheOperatorTreeMountsTheSharedReadsAndItsOwnTrigger()
     {
         IReadOnlyList<Endpoint> built = [];
 
@@ -62,11 +62,13 @@ public sealed class UiRoutesTests
         Assert.Equal(
             [
                 "GET /cadence/ui/health/storage",
+                "GET /cadence/ui/instances",
                 "GET /cadence/ui/jobs",
                 "GET /cadence/ui/jobs/{name}",
                 "GET /cadence/ui/pause",
                 "GET /cadence/ui/runs",
                 "GET /cadence/ui/runs/{id:guid}",
+                "POST /cadence/ui/jobs/{name}/trigger",
                 "PUT /cadence/ui/pause",
             ],
             Routes(built, CadenceApiDefaults.UiPath));
@@ -76,6 +78,10 @@ public sealed class UiRoutesTests
         // something calling us.
         Assert.Contains(
             "POST /cadence/api/jobs/{name}/trigger", Routes(built, CadenceApiDefaults.ApiPath));
+
+        // And the instances read is the operator tree's alone.
+        Assert.DoesNotContain(
+            "GET /cadence/api/instances", Routes(built, CadenceApiDefaults.ApiPath));
     }
 
     [Fact]

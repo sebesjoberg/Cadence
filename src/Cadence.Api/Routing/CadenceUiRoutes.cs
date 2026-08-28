@@ -67,10 +67,13 @@ public static class CadenceUiRoutes
         }
 
         // The reads are the same handlers the machine tree maps: two trees, one implementation. The
-        // trigger is not among them, because the dashboard's records TriggerKind.Manual.
+        // trigger is a route of this tree's own, because it records TriggerKind.Manual where the
+        // machine tree records Api -- but it shares that route's dispatch, so only the kind differs.
         JobEndpoints.MapReads(group);
+        UiTriggerEndpoints.Map(group, requireOperate: cadencePolicies);
         RunEndpoints.Map(group);
         PauseEndpoints.Map(group, requireOperate: cadencePolicies);
+        InstanceEndpoints.Map(group);
         HealthEndpoints.Map(group);
 
         MapTokenAdministration(group, services, api, options);

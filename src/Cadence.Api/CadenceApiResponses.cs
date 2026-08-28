@@ -189,3 +189,32 @@ public sealed record ScheduleResponse(
     TimeSpan? MaxDuration,
     IReadOnlyDictionary<string, string> Settings,
     int Version);
+
+/// <summary>
+/// The instances registered against the shared store, and how stale is stale.
+/// </summary>
+/// <remarks>
+/// Every recorded instance, including ones whose heartbeat has lapsed: a view that drops the dead
+/// instance hides exactly what the reader opened it to see. <paramref name="HeartbeatTimeout"/> is
+/// the janitor's own, so a dashboard marking staleness draws the line where the reaper does.
+/// </remarks>
+/// <param name="Instances">One entry per registered process, in the store's order.</param>
+/// <param name="HeartbeatTimeout">How stale a heartbeat may be before the instance counts as gone.</param>
+public sealed record InstancesResponse(
+    IReadOnlyList<InstanceResponse> Instances,
+    TimeSpan HeartbeatTimeout);
+
+/// <summary>One registered process.</summary>
+/// <param name="InstanceId">The instance's stable id, as it appears on a run.</param>
+/// <param name="MachineName">The host the process is running on.</param>
+/// <param name="ProcessId">The operating system process id.</param>
+/// <param name="AssemblyVersion">The entry assembly's informational version, where one was read.</param>
+/// <param name="StartedAtUtc">When the process registered itself.</param>
+/// <param name="LastHeartbeatUtc">When it last confirmed it was alive.</param>
+public sealed record InstanceResponse(
+    string InstanceId,
+    string MachineName,
+    int ProcessId,
+    string? AssemblyVersion,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset LastHeartbeatUtc);

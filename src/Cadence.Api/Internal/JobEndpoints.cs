@@ -14,6 +14,9 @@ namespace Cadence.Api.Internal;
 /// <summary>The job reads, and the one write a token may make.</summary>
 internal static class JobEndpoints
 {
+    /// <summary>The trigger's pattern, mapped once per tree under its own kind.</summary>
+    internal const string TriggerRoute = "/jobs/{name}/trigger";
+
     /// <summary>Maps the job routes onto an already-policied group.</summary>
     /// <param name="group">The group the control surface mounts under.</param>
     /// <param name="requireOperate">Whether the trigger route requires Cadence's Operate policy.</param>
@@ -43,9 +46,17 @@ internal static class JobEndpoints
     /// <param name="group">The group the tree mounts under.</param>
     /// <param name="requireOperate">Whether the route requires Cadence's Operate policy.</param>
     public static void MapTrigger(IEndpointRouteBuilder group, bool requireOperate)
+        => DeclareTrigger(group.MapPost(TriggerRoute, TriggerAsync), requireOperate);
+
+    /// <summary>
+    /// Declares a trigger route's statuses and its policy, whichever tree mapped it. Shared with
+    /// <see cref="UiTriggerEndpoints"/>, so the two routes cannot promise different answers.
+    /// </summary>
+    /// <param name="trigger">The mapped route.</param>
+    /// <param name="requireOperate">Whether the route requires Cadence's Operate policy.</param>
+    internal static void DeclareTrigger(RouteHandlerBuilder trigger, bool requireOperate)
     {
-        var trigger = group.MapPost("/jobs/{name}/trigger", TriggerAsync)
-            .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
+        trigger.Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
@@ -57,8 +68,19 @@ internal static class JobEndpoints
         }
     }
 
-    private static async Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> TriggerAsync(
+    /// <summary>
+    /// Starts a run and maps whatever came back. The only difference that matters between the two
+    /// trees is that history has to separate someone clicking from something calling us, so the
+    /// kind is the parameter and everything else — the refusals above all — is shared.
+    /// </summary>
+    /// <param name="name">The job to start.</param>
+    /// <param name="kind">What the run is recorded as having been started by.</param>
+    /// <param name="trigger">Dispatches the run.</param>
+    /// <param name="cadence">Supplies this instance's id, for the response.</param>
+    /// <param name="cancellationToken">Cancels the dispatch.</param>
+    internal static async Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> DispatchAsync(
         string name,
+        TriggerKind kind,
         IJobTrigger trigger,
         IOptions<CadenceOptions> cadence,
         CancellationToken cancellationToken)
@@ -67,8 +89,9 @@ internal static class JobEndpoints
 
         try
         {
-            // Api, not Manual: history has to separate someone clicking from something calling us.
-            result = await trigger.TriggerAsync(name, TriggerKind.Api, payload: null, cancellationToken);
+            // No payload, on either tree. §13.2: accepting caller JSON would widen the route from
+            // "start the job as configured" to "start the job with arbitrary input".
+            result = await trigger.TriggerAsync(name, kind, payload: null, cancellationToken);
         }
         catch (Exception ex) when (ProblemMapper.Describe(ex) is { } problem)
         {
@@ -84,6 +107,13 @@ internal static class JobEndpoints
                 statusCode: StatusCodes.Status202Accepted)
             : ProblemMapper.AsResult(ProblemMapper.Skipped(name, result));
     }
+
+    private static Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> TriggerAsync(
+        string name,
+        IJobTrigger trigger,
+        IOptions<CadenceOptions> cadence,
+        CancellationToken cancellationToken)
+        => DispatchAsync(name, TriggerKind.Api, trigger, cadence, cancellationToken);
 
     // Resolving every schedule per request is deliberate: this is a dashboard read, not the tick
     // loop, and resolving means the answer matches what the ticker would do right now.
