@@ -301,6 +301,10 @@ job's cron, timezone, enabled flag, overlap policy and maximum duration. Two thi
 - **A schedule edit is audited to the log only**, as who changed which job's cron and to what — no
   audit table exists. [Design plan](docs/design-plan.md) §14.5 records the one that would.
 
+Both trees log through source-generated `LoggerMessage`s with a fixed event id per message:
+`Cadence.Api`'s run 3000–3007 and 3100–3102, `Cadence.Dashboard`'s start at 3200 — grepping logs
+across both assemblies for an event id never lands you in the wrong one.
+
 **The gate is the API's, one row narrower.** `MapCadenceApi()` maps for a bearer token alone;
 `MapCadenceDashboard()` does not, because no browser presents one — configure `CadenceApiOptions.Oidc`
 so a person can sign in, or name an authorization policy, or set `AllowUnauthenticated` for a

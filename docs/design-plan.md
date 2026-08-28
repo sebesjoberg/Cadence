@@ -218,6 +218,16 @@ a probe that fails on a store blip fails on all of them at once.*
 **Gap 7. Alert state in memory means a crash-loop resets cooldowns and floods.** Warn at
 boot if alerting is enabled without a persistent store.
 
+**Gap 8. `dotnet pack` logs a `GenerateEmbeddedFilesManifest` warning that `dotnet build` never
+does, for `Cadence.Dashboard`.** Two clean-tree packs both produced a correctly embedded bundle —
+the packed DLL's manifest resources were verified directly both times — so the warning is most
+likely logged against a project-instance evaluation distinct from the one that produces the packed
+output, an artifact of `pack`'s own evaluation pass rather than a real defect. Not settled: run
+`dotnet pack /bl` and read the binary log for `GenerateEmbeddedFilesManifest` and `EmbeddedResource`
+to confirm which project instance logs the warning and which one the packed DLL came from. Does not
+gate CI, which runs `build`, not `pack` — but `pack` is what publishes, so this should be confirmed
+rather than left on the strength of looking fine twice.
+
 ---
 
 ## 9. Measured behaviour and deliberate deviations
