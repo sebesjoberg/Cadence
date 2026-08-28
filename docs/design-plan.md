@@ -409,11 +409,18 @@ exactly this:
 ```csharp
 builder.Services.AddCadence(cadence => cadence
     .UseSqlStorage(connectionString)
-    .AddApi(api => api.BasePath = "/cadence"));
+    .AddApi());
 
 app.MapCadenceApi();          // v0.3
 // app.MapCadenceDashboard(); // v0.4
 ```
+
+v0.4 drops the option that snippet used to set: `CadenceApiOptions` no longer has a `BasePath`, and
+every route is fixed at `/cadence` — `CadenceApiDefaults.BasePath` and the three paths derived from
+it. The dashboard bundle ships prebuilt inside the NuGet package, so there is no build step in the
+consuming application left to bake a configured prefix into; a `BasePath` a host could still set
+would have been a promise the SPA had no way to keep. Fixing it is what lets the bundle work out of
+the box rather than needing a rebuild the package cannot supply.
 
 `MapCadenceApi()` returns the `RouteGroupBuilder` it mounted, so a host can attach its own
 conventions — rate limiting, CORS, OpenAPI metadata — to the tree it just added. For endpoints that
@@ -722,7 +729,7 @@ default) is checked against the ticket's `auth_time` — when the user authentic
 not when the ticket was minted — and a stale one answers 401 with `WWW-Authenticate: CadenceCookie`
 rather than 403: the fix is one redirect back through the provider, not a permissions problem, and
 the status code says which. That redirect has to be a real re-authentication, so
-`{BasePath}/api/auth/login?prompt=login` asks the provider for one and the refusal's `detail` names
+`/cadence/api/auth/login?prompt=login` asks the provider for one and the refusal's `detail` names
 that route. A plain challenge would not do: `auth_time` is the authentication instant, so an SSO
 re-entry answered by the provider's live session returns the same value and the same 401, and the
 advice would be a loop.
@@ -764,14 +771,14 @@ missing `id_token_hint` as an error regardless, a refusal page) rather than sign
 observed against Keycloak in `samples/README.md` step 9.
 
 **A provider-initiated sign-out must name the session it is ending.** `RemoteSignOutPath`
-(`{BasePath}/signout-oidc`) is handled by the OIDC handler inside the authentication middleware,
+(`/cadence/signout-oidc`) is handled by the OIDC handler inside the authentication middleware,
 before routing, so no endpoint filter reaches it and §4.5's session-header rule does not cover it.
 The framework skips its own `sid` comparison when the request carries no `sid`, which left an
 `<img src="…/signout-oidc">` on any page able to sign an operator out. `OnRemoteSignOut` now requires
 a `sid` that matches the current ticket's — which is why `sid` is on §4.3's allow-list — and answers
 400 otherwise.
 
-**The realm's post-logout redirect is `{BasePath}/signout-callback-oidc`**, not
+**The realm's post-logout redirect is `/cadence/signout-callback-oidc`**, not
 `SignedOutRedirectUri` (`/cadence`). The callback path is the leg the provider itself redirects back
 to and must have registered; the redirect URI is a hop Cadence makes afterward, from its own callback
 handler, which the provider never sees. Registering the redirect URI instead yields a Keycloak 400 —

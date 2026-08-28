@@ -8,9 +8,6 @@ namespace Cadence.Api;
 /// </summary>
 public sealed class CadenceApiOptions
 {
-    /// <summary>The prefix both trees mount under.</summary>
-    public string BasePath { get; set; } = "/cadence";
-
     /// <summary>
     /// Tokens accepted as <c>Authorization: Bearer</c>. Configuring one satisfies the mapping gate.
     /// Bound from <c>Cadence:Api:Tokens</c> and from <c>CADENCE_API_TOKEN</c> (comma-separated) in
@@ -22,15 +19,6 @@ public sealed class CadenceApiOptions
 
     /// <summary>How people sign in. Configuring an authority and a client id is what turns it on.</summary>
     public CadenceOidcOptions Oidc { get; } = new();
-
-    /// <summary>
-    /// <see cref="BasePath"/> as a cookie path and a redirect target: no trailing slash, and "/"
-    /// rather than empty, both of which a browser reads differently from the route prefix.
-    /// </summary>
-    internal string EffectivePath => BasePath.TrimEnd('/') is { Length: > 0 } trimmed ? trimmed : "/";
-
-    /// <summary>The prefix the machine-callable tree and the sign-in routes mount under.</summary>
-    internal string ApiPath => $"{BasePath.TrimEnd('/')}/api";
 
     /// <summary>
     /// Maps the endpoints with no authentication of Cadence's own, for a deployment where a proxy

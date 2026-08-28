@@ -59,7 +59,7 @@ public static class CadenceApiEndpointExtensions
         {
             if (options.AllowUnauthenticated)
             {
-                logger.MappedWithAuthenticationDisabled(options.BasePath);
+                logger.MappedWithAuthenticationDisabled(CadenceApiDefaults.BasePath);
             }
             else if (!environment.IsDevelopment())
             {
@@ -67,7 +67,7 @@ public static class CadenceApiEndpointExtensions
             }
             else
             {
-                logger.MappedUnauthenticatedInDevelopment(options.BasePath);
+                logger.MappedUnauthenticatedInDevelopment(CadenceApiDefaults.BasePath);
                 loopbackOnly = true;
             }
         }
@@ -75,7 +75,7 @@ public static class CadenceApiEndpointExtensions
         {
             // Set and overridden. 3001 would contradict the request path, but silence reads as
             // agreement -- and an operator who set this and gets 401s has no line to look at.
-            logger.AuthenticationDisabledButIgnored(options.BasePath);
+            logger.AuthenticationDisabledButIgnored(CadenceApiDefaults.BasePath);
         }
 
         // Only when tokens exist: "0 tokens" on every start of an AllowUnauthenticated deployment is
@@ -97,10 +97,10 @@ public static class CadenceApiEndpointExtensions
             // tokenPolicies with no configured token and no OIDC means only a writable store
             // registered the scheme (see TokenAuthentication.IsRegistered) -- the already-computed
             // flag, not a fresh read of the store.
-            logger.MappedWithNoTokensIssued(options.BasePath);
+            logger.MappedWithNoTokensIssued(CadenceApiDefaults.BasePath);
         }
 
-        var prefix = options.ApiPath;
+        var prefix = CadenceApiDefaults.ApiPath;
         var group = endpoints.MapGroup(prefix);
 
         // §4.5's CSRF rule, on every route a ticket can reach: a cookie without the header is
@@ -116,7 +116,7 @@ public static class CadenceApiEndpointExtensions
 
             // A sibling group, because login has to answer a caller who has no ticket yet and /me
             // authenticates its own caller: neither can sit behind the policy applied below.
-            AuthEndpoints.Map(endpoints.MapGroup($"{prefix}/auth"), options.EffectivePath);
+            AuthEndpoints.Map(endpoints.MapGroup($"{prefix}/auth"), CadenceApiDefaults.BasePath);
         }
 
         // A host policy governs alone when it names one. Otherwise the built-in policies are applied
@@ -185,7 +185,7 @@ public static class CadenceApiEndpointExtensions
             }
             else
             {
-                logger.TokenAdministrationNotMounted(options.BasePath, options.PolicyName!);
+                logger.TokenAdministrationNotMounted(CadenceApiDefaults.BasePath, options.PolicyName!);
             }
         }
 

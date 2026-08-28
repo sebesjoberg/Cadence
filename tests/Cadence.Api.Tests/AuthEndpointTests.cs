@@ -62,7 +62,7 @@ public sealed class AuthEndpointTests
     [InlineData("https://evil.example/steal")]
     [InlineData("/cadenceevil")]
     [InlineData("/cadence/../../evil")]
-    public async Task LoginIgnoresAReturnUrlOutsideTheBasePath(string returnUrl)
+    public async Task LoginIgnoresAReturnUrlOutsideCadence(string returnUrl)
     {
         await using var host = await ApiTestHost.StartWithOidcAsync(recordChallenge: true);
 

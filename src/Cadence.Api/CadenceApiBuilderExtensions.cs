@@ -157,7 +157,7 @@ public static class CadenceApiBuilderExtensions
                 cookie.Cookie.Name = "cadence.session";
                 cookie.Cookie.HttpOnly = true;
 
-                cookie.Cookie.Path = options.EffectivePath;
+                cookie.Cookie.Path = CadenceApiDefaults.BasePath;
 
                 // Secure unconditionally: it describes the browser's leg, so it stays correct behind
                 // a TLS-terminating proxy, and browsers treat localhost as trustworthy.
@@ -181,9 +181,7 @@ public static class CadenceApiBuilderExtensions
             {
                 var options = api.Value;
 
-                // Empty at the root: a request path is matched against these, and "//signin-oidc"
-                // matches nothing.
-                var prefix = options.EffectivePath is "/" ? string.Empty : options.EffectivePath;
+                var prefix = CadenceApiDefaults.BasePath;
 
                 oidc.Authority = options.Oidc.Authority;
                 oidc.ClientId = options.Oidc.ClientId;
@@ -203,7 +201,7 @@ public static class CadenceApiBuilderExtensions
                 oidc.CallbackPath = $"{prefix}/signin-oidc";
                 oidc.SignedOutCallbackPath = $"{prefix}/signout-callback-oidc";
                 oidc.RemoteSignOutPath = $"{prefix}/signout-oidc";
-                oidc.SignedOutRedirectUri = options.EffectivePath;
+                oidc.SignedOutRedirectUri = CadenceApiDefaults.BasePath;
 
                 oidc.Scope.Clear();
 

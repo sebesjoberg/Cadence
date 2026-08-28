@@ -223,15 +223,15 @@ Four environment variables cover it:
 | `CADENCE_OIDC_CLIENT_ID` | the client Cadence authenticates as |
 | `CADENCE_OIDC_CLIENT_SECRET` | its secret, for a confidential client |
 
-**Signing in** is `GET {BasePath}/api/auth/login`, which redirects to the provider and comes back
-holding a `cadence.session` cookie; `POST {BasePath}/api/auth/logout` clears it and, where the
+**Signing in** is `GET /cadence/api/auth/login`, which redirects to the provider and comes back
+holding a `cadence.session` cookie; `POST /cadence/api/auth/logout` clears it and, where the
 provider advertises an end-session endpoint, signs out there too. A signed-in user always carries
 `operate` scope — the surface has no finer grain for a person than it does for a token — and leaving
 `RequiredClaimType` unset admits every user the provider authenticates, which `MapCadenceApi()` warns
 about at every start.
 
-**A signed-in user can mint API tokens at `POST {BasePath}/api/tokens`, scoped `read` or `operate`,
-and revoke them at `DELETE {BasePath}/api/tokens/{id}`.** Four rules worth knowing before relying on
+**A signed-in user can mint API tokens at `POST /cadence/api/tokens`, scoped `read` or `operate`,
+and revoke them at `DELETE /cadence/api/tokens/{id}`.** Four rules worth knowing before relying on
 any of it:
 
 - **A token cannot mint another token.** Every route under `/tokens` requires a signed-in user
@@ -256,7 +256,7 @@ Minting a token requires a *recently* signed-in user — `TokenCreationMaxAge`, 
 default — checked against when the provider says the user authenticated (`auth_time`), not when the
 ticket was issued or when it expires. A stale ticket answers 401 with
 `WWW-Authenticate: CadenceCookie`, because the fix is one redirect back through the provider, not a
-permissions problem. The refusal names the redirect: `{BasePath}/api/auth/login?prompt=login` asks
+permissions problem. The refusal names the redirect: `/cadence/api/auth/login?prompt=login` asks
 the provider to authenticate the user again, which is what actually moves `auth_time` — a plain
 sign-in is answered by the provider's live session and comes back just as stale.
 

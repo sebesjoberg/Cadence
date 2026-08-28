@@ -467,7 +467,7 @@ comments, so what is in it belongs here:
 | Realm | `cadence` | issuer `http://localhost:8080/realms/cadence`, or `:8081` on the Redis AppHost |
 | Client | `cadence-dashboard`, confidential, standard flow only | Cadence is a server-side client and holds a secret; there is no implicit or password grant to enable |
 | Secret | `cadence-dashboard-secret` | in the file on purpose, like the `deadbeef` token: the right shape, obviously not a secret |
-| Redirect URIs | `http://localhost:5080/cadence/signin-oidc` and `:5081` | the callback is under `BasePath`, not at the framework's `/signin-oidc`, so a realm copied from a tutorial names the wrong path |
+| Redirect URIs | `http://localhost:5080/cadence/signin-oidc` and `:5081` | the callback sits under Cadence's fixed `/cadence` prefix, not at the framework's `/signin-oidc`, so a realm copied from a tutorial names the wrong path |
 | Post-logout URIs | `http://localhost:5080/cadence/signout-callback-oidc` and `:5081` | the *provider's* return leg, not `SignedOutRedirectUri` — the browser reaches `/cadence` one hop later |
 | Realm role | `cadence-operator` | mapped into the ID token as a flat `cadence_role` claim, because Keycloak's default `realm_access.roles` is nested JSON no claim comparison can read |
 | User | `admin` / `admin123!`, holding that role | the claim is checked in `OnTokenValidated`, so a user without it is refused at the callback and never holds a session |

@@ -77,7 +77,7 @@ internal static class TokenEndpoints
             context.Response.Headers.WWWAuthenticate = CadenceApiDefaults.CookieScheme;
 
             return ProblemMapper.AsResult(ProblemMapper.StaleSession(
-                oidc.TokenCreationMaxAge, AuthEndpoints.FreshLoginPath(options.Value.ApiPath)));
+                oidc.TokenCreationMaxAge, AuthEndpoints.FreshLoginPath(CadenceApiDefaults.ApiPath)));
         }
 
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > MaxNameLength)

@@ -109,22 +109,23 @@ public sealed class CookieAuthenticationTests
 
     // The framework's default paths would collide with a host's own OIDC registration.
     [Fact]
-    public async Task TheHandshakeAndTheTicketBothSitUnderTheBasePath()
+    public async Task TheHandshakeAndTheTicketBothSitUnderTheFixedPath()
     {
-        await using var host = await ApiTestHost.StartWithOidcAsync(
-            configure: options => options.BasePath = "/ops");
-
-        var oidc = OidcOptions(host);
+        await using var host = await ApiTestHost.StartAsync(ConfigureOidc);
 
         var cookie = host.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(CadenceApiDefaults.CookieScheme);
 
-        Assert.Equal("/ops/signin-oidc", oidc.CallbackPath);
-        Assert.Equal("/ops/signout-callback-oidc", oidc.SignedOutCallbackPath);
-        Assert.Equal("/ops/signout-oidc", oidc.RemoteSignOutPath);
-        Assert.Equal("/ops", oidc.SignedOutRedirectUri);
-        Assert.Equal("/ops", cookie.Cookie.Path);
+        var oidc = host.Services
+            .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(CadenceApiDefaults.OidcScheme);
+
+        Assert.Equal("/cadence", cookie.Cookie.Path);
+        Assert.Equal("/cadence/signin-oidc", oidc.CallbackPath);
+        Assert.Equal("/cadence/signout-oidc", oidc.RemoteSignOutPath);
+        Assert.Equal("/cadence/signout-callback-oidc", oidc.SignedOutCallbackPath);
+        Assert.Equal("/cadence", oidc.SignedOutRedirectUri);
     }
 
     // Without openid the provider need not treat the request as an OIDC one at all.
@@ -265,4 +266,11 @@ public sealed class CookieAuthenticationTests
         => host.Services
             .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
             .Get(CadenceApiDefaults.OidcScheme);
+
+    /// <summary>The minimum that turns both schemes on, with no other test wiring.</summary>
+    private static void ConfigureOidc(CadenceApiOptions options)
+    {
+        options.Oidc.Authority = ApiTestHost.OidcAuthority;
+        options.Oidc.ClientId = "cadence-tests";
+    }
 }
