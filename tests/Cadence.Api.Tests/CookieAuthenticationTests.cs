@@ -111,7 +111,7 @@ public sealed class CookieAuthenticationTests
     [Fact]
     public async Task TheHandshakeAndTheTicketBothSitUnderTheFixedPath()
     {
-        await using var host = await ApiTestHost.StartAsync(ConfigureOidc);
+        await using var host = await ApiTestHost.StartWithOidcAsync();
 
         var cookie = host.Services
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
@@ -266,11 +266,4 @@ public sealed class CookieAuthenticationTests
         => host.Services
             .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
             .Get(CadenceApiDefaults.OidcScheme);
-
-    /// <summary>The minimum that turns both schemes on, with no other test wiring.</summary>
-    private static void ConfigureOidc(CadenceApiOptions options)
-    {
-        options.Oidc.Authority = ApiTestHost.OidcAuthority;
-        options.Oidc.ClientId = "cadence-tests";
-    }
 }
