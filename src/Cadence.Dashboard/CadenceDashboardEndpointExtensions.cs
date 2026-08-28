@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -85,6 +86,14 @@ public static class CadenceDashboardEndpointExtensions
                 loopbackOnly = true;
             }
         }
+
+        // Rooted at the bundle rather than the assembly, so a path the request supplies is
+        // resolved inside wwwroot and nowhere else.
+        var files = new ManifestEmbeddedFileProvider(
+            typeof(CadenceDashboardEndpointExtensions).Assembly, "wwwroot");
+
+        DashboardShell.Map(endpoints, DashboardShell.Render(services, files));
+        AssetEndpoints.Map(endpoints, files);
 
         return CadenceUiRoutes.Map(
             endpoints,

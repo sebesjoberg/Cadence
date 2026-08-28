@@ -72,3 +72,7 @@ desktop.ini
 docs/scratch/
 docs/superpowers/
 .superpowers/
+
+## Dashboard SPA — the bundle is a build output, and its dependency tree is npm's business
+src/Cadence.Dashboard/wwwroot/
+src/Cadence.Dashboard/ui/node_modules/
