@@ -21,6 +21,6 @@ public sealed class InMemoryInstanceDirectoryTests
 
         Assert.Equal(Environment.MachineName, only.MachineName);
         Assert.Equal(Environment.ProcessId, only.ProcessId);
-        Assert.Equal(DateTimeKind.Utc, only.StartedAtUtc.UtcDateTime.Kind);
+        Assert.Equal(TimeSpan.Zero, only.StartedAtUtc.Offset);
     }
 }
