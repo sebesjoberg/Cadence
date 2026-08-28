@@ -2,10 +2,9 @@ import { createRoute } from '@tanstack/react-router'
 import type { JSX } from 'react'
 import { bootstrap } from '../bootstrap'
 import { Cluster } from '../screens/Cluster'
-import { JobDetail } from '../screens/JobDetail'
-import { Jobs } from '../screens/Jobs'
 import { Tokens } from '../screens/Tokens'
 import { rootRoute } from './__root'
+import { jobDetailRoute, jobsRoute } from './jobs'
 import { runDetailRoute, runsRoute } from './runs'
 
 const child = (path: string, component: () => JSX.Element) =>
@@ -16,8 +15,8 @@ const child = (path: string, component: () => JSX.Element) =>
 const tokensRoute = bootstrap.capabilities.tokens ? [child('/tokens', Tokens)] : []
 
 export const routeTree = rootRoute.addChildren([
-  child('/', Jobs),
-  child('/jobs/$name', JobDetail),
+  jobsRoute,
+  jobDetailRoute,
   runsRoute,
   runDetailRoute,
   child('/cluster', Cluster),

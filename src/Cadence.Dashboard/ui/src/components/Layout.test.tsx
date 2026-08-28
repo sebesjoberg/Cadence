@@ -19,6 +19,12 @@ describe('shell', () => {
   beforeEach(() => {
     vi.resetModules()
     server.use(
+      // The shell is rendered at '/', which is the overview -- so these two are the screen's, not
+      // the shell's. Declared here because the suite refuses an unhandled request.
+      http.get('/cadence/ui/jobs', () => HttpResponse.json([])),
+      http.get('/cadence/ui/pause', () =>
+        HttpResponse.json({ scope: 'None', reason: null, setBy: null, setAtUtc: null }),
+      ),
       http.get('/cadence/ui/health/storage', () =>
         HttpResponse.json({
           status: 'Degraded',
