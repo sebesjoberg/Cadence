@@ -152,7 +152,12 @@ public sealed record AuthMeResponse(string Kind, string? Name, string? Subject, 
 /// <param name="Enabled">Whether the scheduler should act on this schedule.</param>
 /// <param name="Overlap">Overrides the job's declared overlap policy when set.</param>
 /// <param name="MaxDuration">Overrides the job's declared maximum duration when set.</param>
-/// <param name="Settings">Arbitrary per-job settings, replacing whatever is stored.</param>
+/// <param name="Settings">
+/// Arbitrary per-job settings. Absent — omitted, or null — preserves whatever is stored, because
+/// absent means "I did not supply this" rather than "make it empty"; an empty object clears them;
+/// entries replace them wholesale, so a caller editing one key sends them all. This is the one
+/// field the write does not replace outright.
+/// </param>
 /// <param name="Version">
 /// The version the editor loaded, for optimistic concurrency. <c>0</c> asks to overwrite whatever
 /// is stored, which is what a first write has and what the storage tier reads as "I did not load

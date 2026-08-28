@@ -139,7 +139,9 @@ internal static class ScheduleEndpoints
             Enabled = request.Enabled,
             Overlap = overlap,
             MaxDuration = request.MaxDuration,
-            Settings = request.Settings ?? ImmutableDictionary<string, string>.Empty,
+            // Absent means "I did not supply this", not "make it empty" -- the rule Version
+            // follows on the same request. An empty object still clears them.
+            Settings = request.Settings ?? previous?.Settings ?? ImmutableDictionary<string, string>.Empty,
             Version = request.Version ?? 0,
         };
 

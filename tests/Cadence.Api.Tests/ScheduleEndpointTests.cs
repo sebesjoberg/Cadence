@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -214,6 +215,66 @@ public sealed class ScheduleEndpointTests
     }
 
     [Fact]
+    public async Task AWriteThatOmitsSettingsKeepsTheStoredOnes()
+    {
+        // Absent means "I did not supply this", not "make it empty" -- the rule Version follows on
+        // the same request object, and an editor that sends only a new cron must not wipe the rest.
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 4, settings: new Dictionary<string, string> { ["batch"] = "500" }));
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath, Edit(NewCron) with { Version = 4 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("500", source.Last!.Settings["batch"]);
+
+        var stored = await response.Content.ReadFromJsonAsync<ScheduleResponse>();
+        Assert.Equal("500", stored!.Settings["batch"]);
+    }
+
+    [Fact]
+    public async Task AnEmptySettingsObjectClearsThem()
+    {
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 4, settings: new Dictionary<string, string> { ["batch"] = "500" }));
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath,
+            Edit(NewCron) with { Version = 4, Settings = new Dictionary<string, string>() });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(source.Last!.Settings);
+    }
+
+    [Fact]
+    public async Task SettingsWithEntriesReplaceTheStoredOnesWholesale()
+    {
+        var source = new FakeWritableScheduleSource();
+        source.Seed(Stored(version: 4, settings: new Dictionary<string, string> { ["batch"] = "500" }));
+
+        await using var host = await StartAsync(source);
+
+        var response = await host.Client.PutAsJsonAsync(
+            SchedulePath,
+            Edit(NewCron) with
+            {
+                Version = 4,
+                Settings = new Dictionary<string, string> { ["retries"] = "3" },
+            });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var written = source.Last!.Settings;
+
+        Assert.Equal("3", written["retries"]);
+        Assert.DoesNotContain("batch", written.Keys);
+    }
+
+    [Fact]
     public async Task AFirstWriteNeedsNoVersion()
     {
         var source = new FakeWritableScheduleSource();
@@ -367,12 +428,14 @@ public sealed class ScheduleEndpointTests
     private static ScheduleWriteRequest Edit(string cron, string zone = "UTC") =>
         new(cron, zone, Enabled: true, Overlap: null, MaxDuration: null, Settings: null, Version: 0);
 
-    private static JobSchedule Stored(int version) => new()
+    private static JobSchedule Stored(
+        int version, IReadOnlyDictionary<string, string>? settings = null) => new()
     {
         JobName = JobName,
         CronExpression = OldCron,
         TimeZoneId = "UTC",
         Enabled = true,
+        Settings = settings ?? ImmutableDictionary<string, string>.Empty,
         Version = version,
     };
 
