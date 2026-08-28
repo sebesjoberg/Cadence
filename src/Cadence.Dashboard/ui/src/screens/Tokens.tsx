@@ -13,6 +13,12 @@ function tokensErrorMessage(error: ProblemError): string {
   return 'Could not load tokens.'
 }
 
+function revokeErrorMessage(error: ProblemError): string {
+  if (error.detail) return error.detail
+  if (error.type) return error.title
+  return 'Could not revoke the token.'
+}
+
 export function Tokens() {
   const [modalOpened, setModalOpened] = useState(false)
   const queryClient = useQueryClient()
@@ -22,7 +28,7 @@ export function Tokens() {
     queryFn: () => api.get<ApiTokenResponse[]>('/tokens'),
   })
 
-  const revoke = useMutation({
+  const revoke = useMutation<void, ProblemError, string>({
     mutationFn: (id: string) => api.delete<void>(`/tokens/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tokens'] }),
   })
@@ -37,6 +43,12 @@ export function Tokens() {
       {error && (
         <Alert color="red" title="Could not load tokens">
           {tokensErrorMessage(error)}
+        </Alert>
+      )}
+
+      {revoke.error && (
+        <Alert color="red" title="Could not revoke the token">
+          {revokeErrorMessage(revoke.error)}
         </Alert>
       )}
 
