@@ -275,6 +275,39 @@ user at the provider takes effect within one cookie lifetime — `CookieLifetime
 default — rather than immediately, because the ticket is never extended by use and nothing here
 tracks which tickets are still live.
 
+## The operator dashboard
+
+```csharp
+builder.Services.AddCadence(cadence => cadence
+    .UseSqlStorage(connectionString)
+    .AddDashboard(api => api.Dashboard.Title = "Cadence — production"));
+
+app.MapCadenceDashboard();
+```
+
+`AddDashboard()` calls `AddApi()` for you — one options object still governs both trees (see
+[The control surface](#the-control-surface)), so a host that wants the machine-callable API as well
+just calls `MapCadenceApi()` too. `MapCadenceDashboard()` embeds a prebuilt React SPA and mounts it,
+together with the endpoints it calls, at paths fixed under `/cadence`: the bundle ships inside the
+NuGet package, so there is no build step in the consuming application left to bake a configured
+prefix into. `CadenceDashboardOptions.Title` is what tells two open tabs apart.
+
+The dashboard shows job and run history, lets an operator pause the cluster, mint and revoke API
+tokens, trigger a job by hand — recorded as `Manual`, distinct from a token's `Api` — and edit a
+job's cron, timezone, enabled flag, overlap policy and maximum duration. Two things it does not do:
+
+- **A job's `Settings` are displayed and round-tripped verbatim, never edited.** The form shows
+  them and carries them through unchanged on every save; writing them needs the store directly.
+- **A schedule edit is audited to the log only**, as who changed which job's cron and to what — no
+  audit table exists. [Design plan](docs/design-plan.md) §14.5 records the one that would.
+
+**The gate is the API's, one row narrower.** `MapCadenceApi()` maps for a bearer token alone;
+`MapCadenceDashboard()` does not, because no browser presents one — configure `CadenceApiOptions.Oidc`
+so a person can sign in, or name an authorization policy, or set `AllowUnauthenticated` for a
+deployment a proxy already authenticates. A token-only configuration makes `MapCadenceDashboard()`
+throw at startup rather than ship a UI nobody could sign into. In `Development` with nothing
+configured, it maps anyway, loopback callers only, exactly like the API.
+
 ## Choosing a storage tier
 
 `UseSqlStorage` and `UseRedisStorage` are alternatives. Both replace the same three
@@ -350,8 +383,10 @@ with both tiers held to one conformance suite that runs against a real server in
 Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
 control surface, is complete: the machine-callable API, its token auth gate and the health checks
 described above, alongside distributed pause. v0.3.1, identity, is complete too: OIDC sign-in, API
-tokens with scopes on both storage tiers, and the Data Protection key ring described above. The
-dashboard is next, in v0.4. Not yet published to NuGet.
+tokens with scopes on both storage tiers, and the Data Protection key ring described above. v0.4,
+the operator dashboard, is complete too: `AddDashboard()` and `MapCadenceDashboard()`, described in
+[The operator dashboard](#the-operator-dashboard), and both Aspire samples map it alongside the API.
+Not yet published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

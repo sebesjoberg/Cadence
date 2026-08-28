@@ -29,6 +29,15 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Cadence.Dashboard's SPA bundle is a build output, not a checked-in artifact -- MSBuild
+      # shells out to npm to produce it, so Node has to be on the path before Restore/Build.
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/Cadence.Dashboard/ui/package-lock.json
+
       - name: Restore
         run: dotnet restore Cadence.slnx
 
@@ -60,3 +69,36 @@ jobs:
           name: tests
           path: artifacts/test-results/*.trx
           reporter: dotnet-trx
+
+  # Runs in parallel with build-test rather than as a step inside it, so a lint or unit-test failure
+  # in the SPA is reported on its own check rather than buried inside a passing dotnet build (the
+  # MSBuild target that builds the bundle only runs `npm run build`, never lint or test).
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: src/Cadence.Dashboard/ui
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/Cadence.Dashboard/ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
