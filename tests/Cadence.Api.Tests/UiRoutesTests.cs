@@ -20,7 +20,12 @@ public sealed class UiRoutesTests
 
     private const string PausePath = CadenceApiDefaults.UiPath + "/pause";
 
+    private const string TokensPath = CadenceApiDefaults.UiPath + "/tokens";
+
     private const string LoginPattern = CadenceApiDefaults.ApiPath + "/auth/login";
+
+    /// <summary>The header value <see cref="TestUserHandler"/> mints a principal from: subject|name.</summary>
+    private const string UserHeader = "u1|Ada Lovelace";
 
     /// <summary>Stands in for a policy the host owns, as an app with its own OIDC setup would write.</summary>
     private const string HostPolicy = "cadence-ops";
@@ -33,6 +38,9 @@ public sealed class UiRoutesTests
 
     private static readonly CadenceUiMapOptions Cookie =
         new() { CookiePolicy = true, LoopbackOnly = false };
+
+    private static readonly CadenceUiMapOptions UnderHostPolicy =
+        new() { CookiePolicy = false, LoopbackOnly = false, PolicyName = HostPolicy };
 
     [Fact]
     public async Task TheSharedReadsAnswerOnTheOperatorTree()
@@ -195,21 +203,111 @@ public sealed class UiRoutesTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    // §13.5: mounting depends on the store, governing depends on the policy, and a deployment that
+    // named a policy for reads and pause never consented to credential administration behind it.
+    [Fact]
+    public async Task TokenAdministrationIsNotMountedUnderAHostPolicyWithoutTheOptIn()
+    {
+        var logs = new LogCapture();
+
+        await using var host = await StartUnderAHostPolicyAsync(
+            UnderHostPolicy, new FakeApiTokenStore(), logs: logs);
+
+        host.Client.DefaultRequestHeaders.Add(TestUserHandler.HeaderName, UserHeader);
+
+        var list = await host.Client.GetAsync(TokensPath);
+        var create = await host.Client.PostAsJsonAsync(
+            TokensPath, new ApiTokenRequest("escalation", "Operate", null));
+
+        // 404 from routing, to a caller the host's own policy admits: the routes are not there.
+        Assert.Equal(HttpStatusCode.NotFound, list.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, create.StatusCode);
+
+        // And the operator is told, naming the option that would mount them.
+        Assert.True(logs.HasWarning(3005));
+    }
+
+    [Fact]
+    public async Task TokenAdministrationMountsUnderAHostPolicyWithTheOptIn()
+    {
+        await using var host = await StartUnderAHostPolicyAsync(
+            UnderHostPolicy, new FakeApiTokenStore(), allowTokenAdministration: true);
+
+        host.Client.DefaultRequestHeaders.Add(TestUserHandler.HeaderName, UserHeader);
+
+        var response = await host.Client.GetAsync(TokensPath);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    // The dashboard's own shape: a host policy for who may look, and the CSRF filter still wanted.
+    // Cadence's Operate policy must not be added on top -- the named policy governs alone, and a
+    // principal it admits carries no scope claim of Cadence's.
+    [Fact]
+    public async Task PausingIsReachableUnderAHostPolicyThatAlsoKeepsTheCookieRule()
+    {
+        await using var host = await StartUnderAHostPolicyAsync(
+            new CadenceUiMapOptions { CookiePolicy = true, LoopbackOnly = false, PolicyName = HostPolicy },
+            new FakeApiTokenStore());
+
+        host.Client.DefaultRequestHeaders.Add(TestUserHandler.HeaderName, UserHeader);
+        host.Client.DefaultRequestHeaders.Add(CadenceApiDefaults.SessionHeader, "1");
+
+        var response = await host.Client.PutAsJsonAsync(
+            PausePath, new PauseRequest(nameof(PauseScope.All), "by hand"));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
     private static Task<ApiTestHost> StartAsync(
         CadenceUiMapOptions options,
         Action<CadenceApiOptions>? configure = null,
         Action<IServiceCollection>? services = null,
         IPAddress? remoteIp = null,
-        Action<IReadOnlyList<Endpoint>>? built = null)
+        Action<IReadOnlyList<Endpoint>>? built = null,
+        LogCapture? logs = null,
+        bool testUserScheme = false)
         => ApiTestHost.StartAsync(
             configure ?? (api => api.AllowUnauthenticated = true),
             services,
+            logs: logs,
             remoteIp: remoteIp,
+            testUserScheme: testUserScheme,
             endpoints: routes =>
             {
                 CadenceUiRoutes.Map(routes, options);
                 built?.Invoke([.. routes.DataSources.SelectMany(source => source.Endpoints)]);
             });
+
+    /// <summary>
+    /// A host-named policy over the test-only user scheme, the way <c>TokenEndpointTests</c> writes
+    /// one. The machine tree is left on <c>AllowUnauthenticated</c> so that it mounts its own token
+    /// routes without a host policy, and the 3005 line under test can only have come from this tree.
+    /// </summary>
+    private static Task<ApiTestHost> StartUnderAHostPolicyAsync(
+        CadenceUiMapOptions options,
+        FakeApiTokenStore store,
+        bool allowTokenAdministration = false,
+        LogCapture? logs = null)
+        => StartAsync(
+            options,
+            configure: api =>
+            {
+                api.AllowUnauthenticated = true;
+                api.AllowTokenAdministrationUnderHostPolicy = allowTokenAdministration;
+            },
+            services: collection =>
+            {
+                collection.AddSingleton<IApiTokenStore>(store);
+                collection.AddSingleton<IWritableApiTokenStore>(store);
+                collection.AddAuthorizationBuilder().AddPolicy(
+                    HostPolicy,
+                    policy => policy
+                        .AddAuthenticationSchemes(TestUserHandler.SchemeName)
+                        .RequireAuthenticatedUser());
+            },
+            logs: logs,
+            testUserScheme: true);
 
     private static Task<ApiTestHost> StartWithOidcAsync(CadenceUiMapOptions options)
         => ApiTestHost.StartWithOidcAsync(endpoints: routes => CadenceUiRoutes.Map(routes, options));

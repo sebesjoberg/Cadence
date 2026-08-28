@@ -11,13 +11,21 @@ namespace Cadence.Api.Internal;
 /// </summary>
 internal sealed class AuthMapMarker
 {
-    /// <summary>Where the routes sit whichever tree mapped them, so a bundle can bake the path.</summary>
+    /// <summary>
+    /// Where the sign-in routes sit whichever tree mapped them: under the machine tree's prefix,
+    /// never the caller's, so the path does not depend on which tree asked first.
+    /// </summary>
     private const string AuthPath = CadenceApiDefaults.ApiPath + "/auth";
 
     private bool _mapped;
 
     /// <summary>Maps the sign-in routes, if OIDC is configured and nothing has mapped them yet.</summary>
-    /// <param name="endpoints">The route builder, which also carries the marker's container.</param>
+    /// <param name="endpoints">
+    /// The route builder, which also carries the marker's container. It must be the application's
+    /// root builder: "mapped already" binds to the container, while the routes bind to whichever
+    /// builder called first, so mapping through a nested group would put them under its prefix and
+    /// silence every later caller.
+    /// </param>
     public static void MapOnce(IEndpointRouteBuilder endpoints)
     {
         var services = endpoints.ServiceProvider;
