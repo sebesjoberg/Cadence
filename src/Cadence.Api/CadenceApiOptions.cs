@@ -20,6 +20,9 @@ public sealed class CadenceApiOptions
     /// <summary>How people sign in. Configuring an authority and a client id is what turns it on.</summary>
     public CadenceOidcOptions Oidc { get; } = new();
 
+    /// <summary>What the dashboard presents. Read only where <c>MapCadenceDashboard()</c> is called.</summary>
+    public CadenceDashboardOptions Dashboard { get; } = new();
+
     /// <summary>
     /// Maps the endpoints with no authentication of Cadence's own, for a deployment where a proxy
     /// or service mesh has already authenticated the caller. Logged as a warning on every start,
