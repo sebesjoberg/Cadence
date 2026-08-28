@@ -123,6 +123,20 @@ export interface ScheduleResponse {
   version: number
 }
 
+export interface InstancesResponse {
+  instances: InstanceResponse[]
+  heartbeatTimeout: string
+}
+
+export interface InstanceResponse {
+  instanceId: string
+  machineName: string
+  processId: number
+  assemblyVersion: string | null
+  startedAtUtc: string
+  lastHeartbeatUtc: string
+}
+
 export interface ScheduleWriteRequest {
   cronExpression: string
   timeZoneId: string
