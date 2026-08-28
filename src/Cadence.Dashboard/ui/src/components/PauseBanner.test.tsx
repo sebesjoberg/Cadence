@@ -147,6 +147,25 @@ describe('PauseBanner', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  // The dialog renders a refusal inside itself, so one left over from a resume would read there as
+  // a refusal of the pause nobody has attempted yet.
+  it('does not carry a resume refusal into the dialog opened after it', async () => {
+    server.use(http.get(ROUTE, () => HttpResponse.json(paused('All'))))
+    refuseWrites()
+
+    renderBanner()
+    await userEvent.click(await screen.findByRole('button', { name: 'Resume everything' }))
+
+    expect(await screen.findByText(REFUSAL)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pause…' }))
+
+    const dialog = await screen.findByRole('dialog')
+
+    expect(within(dialog).queryByText(REFUSAL)).not.toBeInTheDocument()
+    expect(screen.queryByText(REFUSAL)).not.toBeInTheDocument()
+  })
+
   it('forgets the chosen scope and the refusal when the dialog is cancelled', async () => {
     server.use(http.get(ROUTE, () => HttpResponse.json(RUNNING)))
     refuseWrites()

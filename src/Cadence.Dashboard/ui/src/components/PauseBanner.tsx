@@ -55,6 +55,13 @@ export function PauseBanner() {
     move.reset()
   }
 
+  // Resetting on the way in as well as out: a resume's refusal is rendered inside this dialog once
+  // it opens, where it would read as a refusal of the pause nobody has attempted yet.
+  function openModal() {
+    move.reset()
+    setOpened(true)
+  }
+
   const schedule = pausesSchedule(data?.scope ?? 'None')
   const triggers = pausesTriggers(data?.scope ?? 'None')
 
@@ -116,7 +123,7 @@ export function PauseBanner() {
                   Resume everything
                 </Button>
               )}
-              <Button size="xs" variant="subtle" onClick={() => setOpened(true)}>
+              <Button size="xs" variant="subtle" onClick={openModal}>
                 Pause…
               </Button>
             </Group>
@@ -127,7 +134,7 @@ export function PauseBanner() {
           <Text size="sm" c="dimmed">
             Scheduling and manual triggers are running.
           </Text>
-          <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+          <Button size="xs" variant="default" onClick={openModal}>
             Pause…
           </Button>
         </Group>
