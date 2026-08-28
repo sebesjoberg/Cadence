@@ -175,6 +175,17 @@ public sealed class RedisStorageMaintenance : IStorageMaintenance
         return (int)(long)result;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Nothing to do. A token key is written with a time-to-live equal to its expiry, so Redis
+    /// removes it without being asked — the one place the two tiers genuinely differ on tidying.
+    /// </remarks>
+    public Task<int> PurgeExpiredApiTokensAsync(
+        DateTimeOffset now,
+        int batchSize,
+        CancellationToken cancellationToken)
+        => Task.FromResult(0);
+
     private static (int Changed, int Scanned) Pair(RedisResult result)
     {
         var values = (RedisResult[])result!;

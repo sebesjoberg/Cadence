@@ -6,7 +6,7 @@ using Xunit;
 namespace Cadence.Storage.Sql.Tests;
 
 /// <summary>
-/// What disposal does when the tier is registered the way <c>UseSqlStorage</c> registers it.
+/// How <c>UseSqlStorage</c> registers the tier, and what disposal then does with it.
 /// </summary>
 /// <remarks>
 /// No container and no server: the schedule source connects lazily, so everything these tests care
@@ -39,6 +39,43 @@ public sealed class SqlDisposalTests
         var thrown = await Record.ExceptionAsync(async () => await provider.DisposeAsync());
 
         Assert.Null(thrown);
+    }
+
+    [Fact]
+    public void TheTokenStoreWinsBothInterfacesAsOneSingleton()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCadence(cadence => cadence.UseSqlStorage(Unreachable));
+
+        var provider = services.BuildServiceProvider();
+
+        // IsType, not IsAssignableFrom: AddCadence offers ConfiguredApiTokenStore for IApiTokenStore,
+        // and a tier that persists tokens it cannot then resolve would fail nowhere else.
+        var read = Assert.IsType<SqlApiTokenStore>(provider.GetRequiredService<IApiTokenStore>());
+        var writable = Assert.IsType<SqlApiTokenStore>(
+            provider.GetRequiredService<IWritableApiTokenStore>());
+
+        // One instance behind both, which is what lets the janitor's expired-token pass reach the
+        // same store the request path resolves through.
+        Assert.Same(read, writable);
+    }
+
+    [Fact]
+    public void TheTokenStoreDisplacesAStoreRegisteredBeforeAddCadence()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // The only ordering that tells Replace and TryAdd apart: AddCadence runs the callback before
+        // offering its own defaults, so a TryAdd would beat those but not a registration made ahead
+        // of AddCadence -- leaving the interface on a store that persists nothing.
+        services.AddSingleton<IApiTokenStore>(new ConfiguredApiTokenStore());
+        services.AddCadence(cadence => cadence.UseSqlStorage(Unreachable));
+
+        var provider = services.BuildServiceProvider();
+
+        Assert.IsType<SqlApiTokenStore>(provider.GetRequiredService<IApiTokenStore>());
     }
 
     [Fact]

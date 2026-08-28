@@ -107,6 +107,23 @@ internal sealed class RedisKeys
     /// <summary>HASH holding the cluster-wide pause switches.</summary>
     public RedisKey Pause => $"{_prefix}pause";
 
+    /// <summary>HASH holding one token's fields, keyed by its digest. This is the lookup.</summary>
+    /// <remarks>
+    /// Keyed by digest rather than by id because resolution happens on every authenticated request
+    /// and id is only needed to administer.
+    /// </remarks>
+    public RedisKey Token(string digestHex) => $"{_prefix}token:{digestHex}";
+
+    /// <summary>HASH of token id to digest hex, so listing and revoking never scan.</summary>
+    public RedisKey Tokens => $"{_prefix}tokens";
+
+    /// <summary>LIST of the Data Protection key ring's XML elements, in the order written.</summary>
+    /// <remarks>
+    /// The layout is the framework's, not Cadence's: <c>RedisXmlRepository</c> owns what goes in
+    /// here, and this file only names the key it goes in.
+    /// </remarks>
+    public RedisKey DataProtectionKeys => $"{_prefix}dataprotection:keys";
+
     /// <summary>HASH of job name to its stored schedule, version excluded.</summary>
     public RedisKey Schedules => $"{_prefix}schedules";
 

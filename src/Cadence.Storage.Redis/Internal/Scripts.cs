@@ -307,6 +307,32 @@ internal static class Scripts
         """;
 
     /// <summary>
+    /// Writes a token's hash, its expiry TTL and its index entry as one unit.
+    /// </summary>
+    /// <remarks>
+    /// KEYS: token hash, tokens index.
+    /// ARGV: id, name, fingerprint, scope, created ticks, subject, by, expires ticks,
+    /// expiry unix ms, digest hex.
+    /// <para>
+    /// Atomic because any part landing without the others is worse than nothing: a hash without
+    /// its TTL resolves forever, since the TTL is the only thing enforcing expiry here and the
+    /// janitor has no pass to run; a hash without its index entry authenticates but can never be
+    /// listed or revoked.
+    /// </para>
+    /// </remarks>
+    public const string CreateToken =
+        """
+        redis.call('HSET', KEYS[1],
+          'id', ARGV[1], 'name', ARGV[2], 'fp', ARGV[3], 'scope', ARGV[4],
+          'created', ARGV[5], 'sub', ARGV[6], 'by', ARGV[7], 'expires', ARGV[8])
+        if ARGV[8] ~= '0' then
+          redis.call('PEXPIREAT', KEYS[1], ARGV[9])
+        end
+        redis.call('HSET', KEYS[2], ARGV[1], ARGV[10])
+        return 1
+        """;
+
+    /// <summary>
     /// Writes the pause switches and bumps the schedule version counter.
     /// </summary>
     /// <remarks>

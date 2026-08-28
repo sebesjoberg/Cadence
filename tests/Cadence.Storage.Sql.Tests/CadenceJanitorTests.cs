@@ -258,6 +258,8 @@ public sealed class CadenceJanitorTests
         var history = new SqlRunHistoryStore(
             database, options, NullLogger<SqlRunHistoryStore>.Instance);
 
+        var tokens = new SqlApiTokenStore(database, clock);
+
         var cadence = Options.Create(new CadenceOptions
         {
             InstanceId = "janitor-test",
@@ -274,7 +276,7 @@ public sealed class CadenceJanitorTests
         };
 
         var janitor = new CadenceJanitor(
-            new SqlStorageMaintenance(database, history),
+            new SqlStorageMaintenance(database, history, tokens),
             janitorOptions,
             clock,
             cadence,

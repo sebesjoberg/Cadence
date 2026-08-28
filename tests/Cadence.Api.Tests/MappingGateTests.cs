@@ -31,7 +31,13 @@ public sealed class MappingGateTests
     {
         var app = BuildApp(Environments.Production);
 
-        Assert.Throws<CadenceStartupException>(() => app.MapCadenceApi());
+        var exception = Assert.Throws<CadenceStartupException>(() => app.MapCadenceApi());
+
+        // All four remedies GateFailureMessage names.
+        Assert.Contains("CADENCE_API_TOKEN", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("CadenceApiOptions.Oidc", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("CadenceApiOptions.RequireAuthorization", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("CadenceApiOptions.AllowUnauthenticated", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -67,6 +73,123 @@ public sealed class MappingGateTests
     }
 
     [Fact]
+    public async Task OidcConfiguredSatisfiesTheGateInProduction()
+    {
+        await using var host = await ApiTestHost.StartAsync(
+            configure: options =>
+            {
+                options.Oidc.Authority = "https://idp.example/realms/cadence";
+                options.Oidc.ClientId = "cadence";
+                options.Oidc.RequiredClaimValue = "operator";
+                options.Oidc.RequiredClaimType = "roles";
+            },
+            environment: Environments.Production);
+
+        // Mapping is the assertion: the gate throws from MapCadenceApi, so reaching here is success.
+        var response = await host.Client.GetAsync("/cadence/api/jobs");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task NoRequiredClaimIsWarnedAbout()
+    {
+        var logs = new LogCapture();
+
+        await using var host = await ApiTestHost.StartAsync(
+            configure: options =>
+            {
+                options.Oidc.Authority = "https://idp.example/realms/cadence";
+                options.Oidc.ClientId = "cadence";
+            },
+            environment: Environments.Production,
+            logs: logs);
+
+        Assert.Contains(
+            logs.Records,
+            record => record.Level == LogLevel.Warning
+                && record.Message.Contains("any user", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AWritableStoreWithNoTokensAndNoOidcLogsThatTokenPolicyIsEnforced()
+    {
+        // §13.3's row 4: a writable store, no configured tokens, no host policy, no flag.
+        var logs = new LogCapture();
+        var store = new FakeApiTokenStore();
+
+        await using var host = await ApiTestHost.StartAsync(
+            environment: Environments.Production,
+            services: services => services.AddSingleton<IApiTokenStore>(store),
+            logs: logs);
+
+        var response = await host.Client.GetAsync("/cadence/api/jobs");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.True(logs.HasWarning(3003));
+    }
+
+    // §13.3's Development branch, with a storage package registered. Every SQL and Redis deployment
+    // registers a writable store, so treating that as authentication would answer 401 to everything
+    // in a container that shipped with ASPNETCORE_ENVIRONMENT=Development -- and no credential is
+    // obtainable there, because /tokens needs a user principal and a user needs a provider.
+    [Fact]
+    public async Task AWritableStoreDoesNotCloseTheDevelopmentBranch()
+    {
+        var logs = new LogCapture();
+
+        await using var host = await ApiTestHost.StartAsync(
+            environment: Environments.Development,
+            services: services => services.AddSingleton<IApiTokenStore>(new FakeApiTokenStore()),
+            logs: logs);
+
+        var loopback = await host.Client.GetAsync("/cadence/api/pause");
+
+        Assert.Equal(HttpStatusCode.OK, loopback.StatusCode);
+
+        // On the loopback branch, so warned about as such rather than as an enforced token path.
+        Assert.True(logs.HasWarning(3000));
+        Assert.False(logs.HasWarning(3003));
+    }
+
+    [Fact]
+    public async Task AWritableStoreStillRefusesANonLoopbackCallerInDevelopment()
+    {
+        await using var host = await ApiTestHost.StartAsync(
+            environment: Environments.Development,
+            services: services => services.AddSingleton<IApiTokenStore>(new FakeApiTokenStore()),
+            remoteIp: Remote);
+
+        var response = await host.Client.GetAsync("/cadence/api/pause");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    // The signal stands where the loopback branch is not on offer: a host policy needs the scheme
+    // registered to authenticate into, whatever the environment.
+    [Fact]
+    public async Task AWritableStoreRegistersTheSchemeForAHostPolicyEvenInDevelopment()
+    {
+        await using var host = await ApiTestHost.StartAsync(
+            configure: api => api.RequireAuthorization(HostPolicy),
+            environment: Environments.Development,
+            services: services =>
+            {
+                services.AddSingleton<IApiTokenStore>(new FakeApiTokenStore());
+                services.AddAuthorizationBuilder().AddPolicy(
+                    HostPolicy,
+                    policy => policy
+                        .AddAuthenticationSchemes(CadenceApiDefaults.AuthenticationScheme)
+                        .RequireAuthenticatedUser());
+            });
+
+        // A 401 and not a 500: evaluating a policy that names an unregistered scheme throws.
+        var response = await host.Client.GetAsync("/cadence/api/jobs");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public void MappingInDevelopmentWithNothingConfiguredWarns()
     {
         var logs = new LogCapture();
@@ -86,6 +209,26 @@ public sealed class MappingGateTests
         app.MapCadenceApi();
 
         Assert.True(logs.HasWarning(3001));
+    }
+
+    // Set and overridden: the operator otherwise gets enforcement and no line saying the flag did
+    // nothing. A configured provider logs nothing of its own, which is where the silence was worst.
+    [Fact]
+    public async Task AllowUnauthenticatedIsWarnedAboutWhenSomethingElseEnforcesAuthentication()
+    {
+        var logs = new LogCapture();
+
+        await using var host = await ApiTestHost.StartWithOidcAsync(
+            configure: options => options.AllowUnauthenticated = true,
+            logs: logs);
+
+        var response = await host.Client.GetAsync("/cadence/api/jobs");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.True(logs.HasWarning(3006));
+
+        // Not 3001: that one says no authentication is performed, which would be untrue here.
+        Assert.False(logs.HasWarning(3001));
     }
 
     [Fact]
@@ -112,11 +255,19 @@ public sealed class MappingGateTests
         var authorized = Request("GET", "/cadence/api/jobs");
         authorized.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
 
+        var write = Request("PUT", "/cadence/api/pause");
+        write.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
         var authenticated = await host.Client.SendAsync(authorized);
+        var written = await host.Client.SendAsync(write);
         var anonymous = await host.Client.GetAsync("/cadence/api/jobs");
 
         Assert.Equal(HttpStatusCode.OK, authenticated.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        // The write too: a named policy governs alone, so Cadence adds no scope requirement of its
+        // own on top of it.
+        Assert.Equal(HttpStatusCode.NoContent, written.StatusCode);
     }
 
     [Theory]
@@ -142,7 +293,7 @@ public sealed class MappingGateTests
 
         var response = await host.Client.SendAsync(Request("PUT", "/cadence/api/pause"));
 
-        // Through ProblemMapper, like every other refusal, and carrying all three ways out: whoever
+        // Through ProblemMapper, like every other refusal, and carrying all four ways out: whoever
         // meets this is likelier to be scanning the port than holding the deployment's runbook.
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
 
@@ -150,6 +301,7 @@ public sealed class MappingGateTests
         Assert.NotNull(problem);
         Assert.Equal(403, problem.Status);
         Assert.Contains("CADENCE_API_TOKEN", problem.Detail!, StringComparison.Ordinal);
+        Assert.Contains("CadenceApiOptions.Oidc", problem.Detail!, StringComparison.Ordinal);
         Assert.Contains("RequireAuthorization", problem.Detail!, StringComparison.Ordinal);
         Assert.Contains("AllowUnauthenticated", problem.Detail!, StringComparison.Ordinal);
     }

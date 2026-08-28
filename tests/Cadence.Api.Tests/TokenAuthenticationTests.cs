@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Cadence.Storage;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -62,6 +63,54 @@ public sealed class TokenAuthenticationTests
         var response = await host.Client.SendAsync(Request("not-the-token-but-the-same-length", PausePath));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    // An unauthenticated caller must not be able to drive a store round trip per request. The shape
+    // is not a cache: a well-formed value below still reaches the store every time.
+    [Fact]
+    public async Task AMalformedBearerNeverReachesTheStore()
+    {
+        var store = new FakeApiTokenStore();
+
+        await using var host = await ApiTestHost.StartAsync(
+            services: services =>
+            {
+                services.AddSingleton<IApiTokenStore>(store);
+                services.AddSingleton<IWritableApiTokenStore>(store);
+            });
+
+        foreach (var presented in new[] { "not-a-cadence-token", "short", new string('a', 43) + "!" })
+        {
+            var response = await host.Client.SendAsync(Request(presented, PausePath));
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        Assert.Equal(0, store.Lookups);
+    }
+
+    [Fact]
+    public async Task AWellShapedUnknownBearerIsStillResolvedThroughTheStore()
+    {
+        var store = new FakeApiTokenStore();
+
+        await using var host = await ApiTestHost.StartAsync(
+            services: services =>
+            {
+                services.AddSingleton<IApiTokenStore>(store);
+                services.AddSingleton<IWritableApiTokenStore>(store);
+            });
+
+        var (secret, _) = ApiTokenSecret.Create();
+
+        var first = await host.Client.SendAsync(Request(secret, PausePath));
+        var second = await host.Client.SendAsync(Request(secret, PausePath));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
+
+        // Twice, not once: nothing about the answer is remembered.
+        Assert.Equal(2, store.Lookups);
     }
 
     [Fact]

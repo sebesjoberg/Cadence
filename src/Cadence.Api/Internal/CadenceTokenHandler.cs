@@ -1,52 +1,64 @@
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Cadence.Storage;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Cadence.Api.Internal;
 
-/// <summary>Authenticates <c>Authorization: Bearer</c> against the configured tokens.</summary>
+/// <summary>Authenticates <c>Authorization: Bearer</c> against the configured tokens, then the store.</summary>
 internal sealed class CadenceTokenHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     private readonly TokenSet _tokens;
+    private readonly IApiTokenStore _store;
 
     public CadenceTokenHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        TokenSet tokens)
+        TokenSet tokens,
+        IApiTokenStore store)
         : base(options, logger, encoder)
-        => _tokens = tokens;
+    {
+        _tokens = tokens;
+        _store = store;
+    }
 
-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         if (!Request.Headers.TryGetValue("Authorization", out var values) ||
             !AuthenticationHeaderValue.TryParse(values.ToString(), out var header) ||
             !string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrEmpty(header.Parameter))
         {
-            return Task.FromResult(AuthenticateResult.NoResult());
+            return AuthenticateResult.NoResult();
         }
 
-        if (_tokens.Match(header.Parameter) is not { } fingerprint)
+        if (_tokens.Match(header.Parameter) is { } fingerprint)
         {
-            return Task.FromResult(AuthenticateResult.Fail("The presented token is not configured."));
+            return Success(CadencePrincipal.ForConfiguredToken(fingerprint));
         }
 
-        // The name is a fingerprint of the token, not the token: it is stable across restarts, so an
-        // audit trail attributes a pause to the same caller each time, and it is not a secret.
-        var identity = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.Name, $"token:{fingerprint}"),
-                new Claim(CadenceTokenDefaults.TokenClaim, fingerprint),
-            ],
-            CadenceTokenDefaults.Scheme,
-            ClaimTypes.Name,
-            roleType: null);
+        // A shape the store could never have issued is refused here rather than there: an
+        // unauthenticated caller would otherwise cost one seek and one pooled connection per request.
+        // A configured token is matched above, so its own format is not constrained by this.
+        if (!ApiTokenSecret.HasSecretShape(header.Parameter))
+        {
+            return AuthenticateResult.Fail("The presented token was not minted by Cadence.");
+        }
 
-        return Task.FromResult(AuthenticateResult.Success(
-            new AuthenticationTicket(new ClaimsPrincipal(identity), CadenceTokenDefaults.Scheme)));
+        // Asked on every request that got this far, and nothing is cached: a revoked token has to
+        // stop working on the next call, on every instance.
+        var stored = await _store.FindAsync(
+            ApiTokenSecret.Digest(header.Parameter), Context.RequestAborted);
+
+        return stored is null
+            ? AuthenticateResult.Fail("The presented token is neither configured nor stored.")
+            : Success(CadencePrincipal.ForStoredToken(stored));
     }
+
+    private static AuthenticateResult Success(ClaimsPrincipal principal)
+        => AuthenticateResult.Success(new AuthenticationTicket(principal, CadenceTokenDefaults.Scheme));
 }

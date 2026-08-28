@@ -118,26 +118,39 @@ app.MapCadenceHealth();
 | `GET /cadence/api/pause` | the current pause switches |
 | `PUT /cadence/api/pause` | changes them — 204, or 400 for a scope outside the defined flags |
 | `GET /cadence/api/health/storage` | storage health, for humans and the dashboard |
+| `GET /cadence/api/auth/login` | redirects to the OIDC provider — 302; mounted only where `Oidc` is configured |
+| `POST /cadence/api/auth/logout` | clears the cookie — 204, or a redirect to the provider's end-session endpoint |
+| `GET /cadence/api/auth/me` | who the caller is — 200, or 401 unauthenticated |
+| `POST /cadence/api/tokens` | creates a token — 201 with the secret, shown once; mounted only where a store can persist one |
+| `GET /cadence/api/tokens` | lists tokens — no secret, no digest |
+| `DELETE /cadence/api/tokens/{id}` | revokes one — 204 |
 
 Schedule edits are not on this tree, on purpose: a triggered run is loud, appears in history, and is
 over; a changed cron expression is silent and permanent. A token can start work and stop it — only
-a person changes when work happens.
+a person changes when work happens, and only a person administers the tokens that do either (see
+[Authentication](#authentication)).
 
 ### The mapping gate
 
 `MapCadenceApi()` refuses to map outside `Development` unless something will authenticate it, so
 that shipping the package cannot silently expose "run any registered job" to the internet. The
 refusal happens at *map* time — during startup, before the server listens — so a missing token fails
-the deploy rather than whoever finds the open endpoint first. Satisfy it one of four ways:
+the deploy rather than whoever finds the open endpoint first. Satisfy it one of five ways:
 
 - Configure one or more tokens (below).
+- Configure `CadenceApiOptions.Oidc` — an authority and a client id (see
+  [Authentication](#authentication)) — so people sign in through a real identity provider instead of,
+  or alongside, a token.
 - Call `options.RequireAuthorization("policy")` inside `AddApi(options => ...)` to hand the gate to
-  a policy of your own. If you also configure at least one token, that policy can name
+  a policy of your own. If you also configure at least one token or a provider, that policy can name
   `CadenceApiDefaults.AuthenticationScheme` and the token scheme authenticates into it — so an app
-  with its own OIDC setup can accept both by writing one policy. Naming that scheme with no token
+  with its own OIDC setup can accept both by writing one policy. Naming that scheme with neither
   configured leaves it unregistered, and every request answers 500.
 - Set `AllowUnauthenticated = true`, for a deployment a proxy or mesh already authenticates. Logged
-  as a warning on every start.
+  as a warning on every start. A registered storage tier alone does not satisfy the gate the way a
+  token or a provider does — `UseSqlStorage()` is a statement about persistence, not authentication —
+  so `AllowUnauthenticated` overrides *that* signal but never an explicitly configured token or
+  provider.
 - Run in `Development`, where mapping proceeds with a loud warning instead of a throw. The write
   endpoints are reachable on that path — `POST /trigger` runs any registered job, `PUT /pause`
   halts scheduling cluster-wide — so on this path alone Cadence answers **loopback callers only**
@@ -182,6 +195,85 @@ replica at once.
 terminates at the ingress in every real deployment, and Cadence has no reliable way to tell whether
 something upstream already terminated it — guessing wrong is possible in both directions. Put this
 behind TLS.
+
+## Authentication
+
+Two kinds of caller. A person signs in through a real OIDC provider and holds a cookie; Cadence never
+sees a password. A machine holds an opaque token that Cadence itself issues, hashes at rest, and can
+revoke instantly.
+
+```csharp
+builder.Services.AddCadence(cadence => cadence
+    .UseSqlStorage(connectionString)
+    .AddApi(api =>
+    {
+        // CADENCE_OIDC_AUTHORITY, CADENCE_OIDC_CLIENT_ID and CADENCE_OIDC_CLIENT_SECRET are read
+        // automatically; only the claim that admits someone has to be named in code.
+        api.Oidc.RequiredClaimType = "cadence_role";
+        api.Oidc.RequiredClaimValue = "cadence-operator";
+    }));
+```
+
+Four environment variables cover it:
+
+| Variable | What it sets |
+|---|---|
+| `CADENCE_API_TOKEN` | one or more machine tokens, comma-separated |
+| `CADENCE_OIDC_AUTHORITY` | the provider's issuer URL |
+| `CADENCE_OIDC_CLIENT_ID` | the client Cadence authenticates as |
+| `CADENCE_OIDC_CLIENT_SECRET` | its secret, for a confidential client |
+
+**Signing in** is `GET {BasePath}/api/auth/login`, which redirects to the provider and comes back
+holding a `cadence.session` cookie; `POST {BasePath}/api/auth/logout` clears it and, where the
+provider advertises an end-session endpoint, signs out there too. A signed-in user always carries
+`operate` scope — the surface has no finer grain for a person than it does for a token — and leaving
+`RequiredClaimType` unset admits every user the provider authenticates, which `MapCadenceApi()` warns
+about at every start.
+
+**A signed-in user can mint API tokens at `POST {BasePath}/api/tokens`, scoped `read` or `operate`,
+and revoke them at `DELETE {BasePath}/api/tokens/{id}`.** Four rules worth knowing before relying on
+any of it:
+
+- **A token cannot mint another token.** Every route under `/tokens` requires a signed-in user
+  principal, not merely an authenticated one, so a caller holding only a bearer token is refused —
+  the same way an anonymous caller is, under `AllowUnauthenticated`. Credentials are administered by
+  people, never by other credentials. If you named a policy of your own with `RequireAuthorization`,
+  that policy governs alone and these routes are not mapped at all until you also set
+  `AllowTokenAdministrationUnderHostPolicy` — the policy you wrote for reads and triggers is not
+  taken as consent to credential administration behind it.
+- **A `read` token cannot trigger a job or change the pause switches.** `read` reaches the `GET`
+  endpoints only; `operate` is required on top for `POST /trigger` and `PUT /pause`, and the two are
+  separate authorization policies, not one policy with an escalating claim.
+- **Revocation is immediate, on every replica.** Nothing caches a resolved token — each request hits
+  the store — so there is no cache window and no token lifetime to wait out. A revoked token
+  authenticates nobody on its very next request.
+- **A token from configuration is break-glass, not administrable.** `CADENCE_API_TOKEN` and
+  `Cadence:Api:Tokens` both mint `operate`-scoped tokens with no row behind them, so there is nothing
+  for `DELETE /tokens/{id}` to revoke — rotating one means changing the configuration and restarting.
+  Keep it for the case where the provider or the store is the thing that is down.
+
+Minting a token requires a *recently* signed-in user — `TokenCreationMaxAge`, five minutes by
+default — checked against when the provider says the user authenticated (`auth_time`), not when the
+ticket was issued or when it expires. A stale ticket answers 401 with
+`WWW-Authenticate: CadenceCookie`, because the fix is one redirect back through the provider, not a
+permissions problem. The refusal names the redirect: `{BasePath}/api/auth/login?prompt=login` asks
+the provider to authenticate the user again, which is what actually moves `auth_time` — a plain
+sign-in is answered by the provider's live session and comes back just as stale.
+
+**The Data Protection key ring lives in the configured storage tier, unencrypted at rest**, protected
+by that store's own access controls — the same ones your schedules and run history already trust.
+That is what lets the ticket cookie be self-contained: any replica can decrypt any other's cookie,
+with no sticky sessions and no session table. Set `ManageDataProtectionKeys = false` to leave the key
+ring to the host instead, and note that a key ring that is not shared means replicas cannot read each
+other's cookies at all. Either way your own Data Protection is untouched: Cadence's key ring is
+attached to its own cookie scheme, never to your application's app-wide Data Protection options, so
+nothing your application has already protected stops decrypting.
+
+What none of this does: there is no server-side forced logout. Signing out clears the cookie in the
+browser that called it; an operator cannot terminate someone else's session remotely, and disabling a
+user at the provider takes effect within one cookie lifetime — `CookieLifetime`, 8 hours by
+default — rather than immediately, because the ticket is never extended by use and nothing here
+tracks which tickets are still live.
 
 ## Choosing a storage tier
 
@@ -257,8 +349,9 @@ two tiers.
 with both tiers held to one conformance suite that runs against a real server in CI, and a pair of
 Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
 control surface, is complete: the machine-callable API, its token auth gate and the health checks
-described above, alongside distributed pause. Sign-in, sessions and dashboard-created API tokens
-follow in v0.3.1, and the dashboard itself in v0.4. Not yet published to NuGet.
+described above, alongside distributed pause. v0.3.1, identity, is complete too: OIDC sign-in, API
+tokens with scopes on both storage tiers, and the Data Protection key ring described above. The
+dashboard is next, in v0.4. Not yet published to NuGet.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

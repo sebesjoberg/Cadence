@@ -10,7 +10,7 @@ namespace Cadence.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Four passes, all idempotent and all expressed as set operations, which is why no leader election
+/// Five passes, all idempotent and all expressed as set operations, which is why no leader election
 /// is needed: every instance can run this and the result is the same as one instance running it.
 /// That is worth more than the duplicated work it costs, because leader election is a whole
 /// distributed systems problem and this is a tidying job.
@@ -23,7 +23,7 @@ namespace Cadence.Storage;
 /// <para>
 /// Lives in Core, and talks to <see cref="IStorageMaintenance"/> rather than to any particular
 /// store, because everything above is policy that does not change between a database and a
-/// key-value store. Only the four operations do. A tier that persists nothing registers no
+/// key-value store. Only the five operations do. A tier that persists nothing registers no
 /// maintenance implementation and therefore never gets one of these.
 /// </para>
 /// <para>
@@ -127,6 +127,17 @@ public sealed class CadenceJanitor : BackgroundService
             .ConfigureAwait(false);
 
         _logger.JanitorPass(purged, trimmed, reaped, deadInstances);
+
+        // No local containment: this is the least important of the five passes, and the loop in
+        // ExecuteAsync already contains a failure in any of them without escalating it.
+        var purgedTokens = await _maintenance
+            .PurgeExpiredApiTokensAsync(now, batch, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (purgedTokens > 0)
+        {
+            _logger.ApiTokensPurged(purgedTokens);
+        }
     }
 
     private static async Task<bool> WaitAsync(PeriodicTimer timer, CancellationToken stoppingToken)

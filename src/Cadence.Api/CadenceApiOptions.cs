@@ -20,12 +20,39 @@ public sealed class CadenceApiOptions
 
     internal TokenSources TokenSources { get; set; } = new(0, 0, 0);
 
+    /// <summary>How people sign in. Configuring an authority and a client id is what turns it on.</summary>
+    public CadenceOidcOptions Oidc { get; } = new();
+
+    /// <summary>
+    /// <see cref="BasePath"/> as a cookie path and a redirect target: no trailing slash, and "/"
+    /// rather than empty, both of which a browser reads differently from the route prefix.
+    /// </summary>
+    internal string EffectivePath => BasePath.TrimEnd('/') is { Length: > 0 } trimmed ? trimmed : "/";
+
+    /// <summary>The prefix the machine-callable tree and the sign-in routes mount under.</summary>
+    internal string ApiPath => $"{BasePath.TrimEnd('/')}/api";
+
     /// <summary>
     /// Maps the endpoints with no authentication of Cadence's own, for a deployment where a proxy
     /// or service mesh has already authenticated the caller. Logged as a warning on every start,
     /// because the alternative to an awkward named flag is somebody doing something worse.
     /// </summary>
     public bool AllowUnauthenticated { get; set; }
+
+    /// <summary>
+    /// Mounts the token administration tree under a host-named policy, which then governs it. Has no
+    /// effect where no policy is named: Cadence's own user-principal rule governs the tree there.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, and the tree is absent rather than mounted-and-refusing, because whether the
+    /// routes exist and who may reach them are independent facts: mounting depends on a writable
+    /// store, governing depends on the host's policy. An operator who named a policy for reads,
+    /// triggers and pause has not thereby asked for credential administration behind it, where
+    /// whatever that policy already admits — a bearer token included — could mint and revoke. Setting
+    /// this says the policy is meant to cover that too. <c>MapCadenceApi()</c> warns when a writable
+    /// store is registered under a host-named policy and this is unset.
+    /// </remarks>
+    public bool AllowTokenAdministrationUnderHostPolicy { get; set; }
 
     /// <summary>The authorization policy the endpoints require, when the host names one.</summary>
     public string? PolicyName { get; private set; }

@@ -111,3 +111,34 @@ public sealed record StorageCheckResponse(
     string? Description,
     string? Error,
     TimeSpan Duration);
+
+/// <summary>A token as administration sees it. Carries no secret and no digest.</summary>
+public sealed record ApiTokenResponse(
+    Guid Id,
+    string Name,
+    string Fingerprint,
+    string Scope,
+    DateTimeOffset CreatedAtUtc,
+    string? CreatedBy,
+    DateTimeOffset? ExpiresAtUtc);
+
+/// <summary>
+/// A newly created token. <paramref name="Token"/> is the only time the secret is ever returned.
+/// </summary>
+public sealed record ApiTokenCreatedResponse(
+    Guid Id,
+    string Name,
+    string Fingerprint,
+    string Scope,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? ExpiresAtUtc,
+    string Token);
+
+/// <summary>What a caller posts to create a token.</summary>
+public sealed record ApiTokenRequest(string? Name, string? Scope, DateTimeOffset? ExpiresAtUtc);
+
+/// <summary>
+/// Who the caller is, as <c>/auth/me</c> reports it. <paramref name="Kind"/> is <c>user</c> or
+/// <c>token</c>; a token's name is its audit identity rather than a person's.
+/// </summary>
+public sealed record AuthMeResponse(string Kind, string? Name, string? Subject, string? Scope);

@@ -223,4 +223,10 @@ internal static partial class Log
         Message = "Marked {Count} run(s) as lost: their instance stopped heartbeating more than " +
                   "{Timeout} ago, so no outcome was ever recorded for them.")]
     public static partial void RunsReaped(this ILogger logger, int count, TimeSpan timeout);
+
+    [LoggerMessage(
+        EventId = 1503,
+        Level = LogLevel.Information,
+        Message = "Purged {Count} expired API token(s).")]
+    public static partial void ApiTokensPurged(this ILogger logger, int count);
 }

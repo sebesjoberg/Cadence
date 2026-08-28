@@ -130,3 +130,36 @@ public sealed class SqlPauseStoreConformanceTests : PauseStoreConformance
         return new SqlPauseStore(new SqlDatabase(_shared), new FixedClock());
     }
 }
+
+/// <summary>Runs the shared token contract against SQL Server.</summary>
+[Collection(SqlServerCollectionDefinition.Name)]
+public sealed class SqlApiTokenStoreConformanceTests : ApiTokenStoreConformance
+{
+    private readonly SqlServerFixture _fixture;
+
+    // Started at the real clock rather than the fixed default: the suite's expiry test builds its
+    // expiry instant from DateTimeOffset.UtcNow, so a store reading 2026-08-24 would see it as long
+    // past. Advancing from here still moves only when AdvanceAsync says so.
+    private readonly FixedClock _clock = new() { UtcNow = DateTimeOffset.UtcNow };
+
+    private SqlStorageOptions? _shared;
+
+    public SqlApiTokenStoreConformanceTests(SqlServerFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override async Task<IApiTokenStore> CreateAsync()
+    {
+        // One database per test, shared by every store the test creates, so "another instance"
+        // means another instance rather than another database.
+        _shared ??= await _fixture.CreateMigratedAsync("tokens");
+
+        return new SqlApiTokenStore(new SqlDatabase(_shared), _clock);
+    }
+
+    /// <inheritdoc />
+    protected override Task AdvanceAsync(IApiTokenStore store, TimeSpan by)
+    {
+        _clock.Advance(by);
+        return Task.CompletedTask;
+    }
+}

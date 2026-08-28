@@ -56,6 +56,29 @@ internal static class Responses
             entry.Value.Exception?.Message,
             entry.Value.Duration))]);
 
+    /// <summary>Projects a token as administration sees it — no secret, no digest.</summary>
+    /// <param name="token">The stored token.</param>
+    public static ApiTokenResponse ToApiToken(ApiTokenInfo token) => new(
+        token.Id,
+        token.Name,
+        token.Fingerprint,
+        token.Scope.ToString(),
+        token.CreatedAtUtc.ToUniversalTime(),
+        token.CreatedByName ?? token.CreatedBySubject,
+        Utc(token.ExpiresAtUtc));
+
+    /// <summary>Projects a just-created token together with its one-time secret.</summary>
+    /// <param name="token">The stored token.</param>
+    /// <param name="secret">The plaintext secret, minted alongside <paramref name="token"/>.</param>
+    public static ApiTokenCreatedResponse ToCreatedToken(ApiTokenInfo token, string secret) => new(
+        token.Id,
+        token.Name,
+        token.Fingerprint,
+        token.Scope.ToString(),
+        token.CreatedAtUtc.ToUniversalTime(),
+        Utc(token.ExpiresAtUtc),
+        secret);
+
     /// <summary>Normalizes an optional instant to UTC, so a <c>...Utc</c> field is one.</summary>
     /// <param name="instant">The instant, or null.</param>
     public static DateTimeOffset? Utc(DateTimeOffset? instant) => instant?.ToUniversalTime();

@@ -29,6 +29,26 @@ dotnet pack (Join-Path $repoRoot 'Cadence.slnx') `
 
 if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed with exit code $LASTEXITCODE." }
 
+# Clearing the feed is not enough. NuGet keeps an extracted copy of every package it has restored,
+# keyed on id and version alone, and prefers it to the feed -- so a rebuild of the same version is
+# invisible to the sample, and a dependency added since the last one never reaches it. Evict exactly
+# what was just packed.
+$locals = dotnet nuget locals global-packages --list |
+    Where-Object { $_ -match 'global-packages:' } |
+    Select-Object -First 1
+
+$globalPackages = ($locals -split ':\s*', 2)[1]
+
+if (-not $globalPackages) { throw 'Could not read the global packages folder from dotnet nuget locals.' }
+
+Get-ChildItem $feed -Filter '*.nupkg' | ForEach-Object {
+    if ($_.BaseName -match '^(?<id>.+?)\.(?<version>\d+\.\d+\.\d+.*)$') {
+        $cached = Join-Path $globalPackages ($Matches.id.ToLowerInvariant()) $Matches.version
+
+        if (Test-Path $cached) { Remove-Item -Recurse -Force $cached }
+    }
+}
+
 Write-Host ''
 Write-Host "Packed into $feed" -ForegroundColor Green
 Get-ChildItem $feed -Filter '*.nupkg' | ForEach-Object { Write-Host "  $($_.Name)" }

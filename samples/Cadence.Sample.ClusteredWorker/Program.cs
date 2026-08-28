@@ -52,7 +52,17 @@ builder.Services.AddCadence(cadence =>
             options.InstanceId = instanceId;
             options.MaxConcurrentRuns = 4;
         })
-        .AddApi();
+        .AddApi(api =>
+        {
+            // The realm role, as samples/keycloak/cadence-realm.json's protocol mapper writes it
+            // into the ID token. Left unset, MapCadenceApi warns that any user Keycloak
+            // authenticates may trigger jobs and pause the cluster.
+            api.Oidc.RequiredClaimType = "cadence_role";
+            api.Oidc.RequiredClaimValue = "cadence-operator";
+
+            // Keycloak in start-dev serves plain HTTP and no HTTPS. A deployment leaves this alone.
+            api.Oidc.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+        });
 
     if (redisConnectionString is not null)
     {
@@ -121,8 +131,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(ui => ui.SwaggerEndpoint("/openapi/v1.json", "Cadence control surface"));
 }
 
-// The gate: this throws outside Development unless something will authenticate the tree. What
-// satisfies it here is the token in appsettings.Development.json.
+// The gate: this throws outside Development unless something will authenticate the tree. Under an
+// AppHost that is Keycloak; running this project on its own it is the token in
+// appsettings.Development.json.
 app.MapCadenceApi();
 app.MapCadenceHealth();
 

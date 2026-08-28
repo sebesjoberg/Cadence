@@ -3,7 +3,7 @@ using Cadence.Storage.Sql.Internal;
 namespace Cadence.Storage.Sql;
 
 /// <summary>
-/// The SQL tier's half of the janitor: four set operations and nothing else.
+/// The SQL tier's half of the janitor: five set operations and nothing else.
 /// </summary>
 /// <remarks>
 /// A separate class rather than another face on <see cref="SqlRunHistoryStore"/>, because the
@@ -15,14 +15,17 @@ public sealed class SqlStorageMaintenance : IStorageMaintenance
 {
     private readonly SqlDatabase _database;
     private readonly SqlRunHistoryStore _history;
+    private readonly SqlApiTokenStore _tokens;
 
-    internal SqlStorageMaintenance(SqlDatabase database, SqlRunHistoryStore history)
+    internal SqlStorageMaintenance(SqlDatabase database, SqlRunHistoryStore history, SqlApiTokenStore tokens)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(tokens);
 
         _database = database;
         _history = history;
+        _tokens = tokens;
     }
 
     /// <inheritdoc />
@@ -66,4 +69,11 @@ public sealed class SqlStorageMaintenance : IStorageMaintenance
             },
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public Task<int> PurgeExpiredApiTokensAsync(
+        DateTimeOffset now,
+        int batchSize,
+        CancellationToken cancellationToken)
+        => _tokens.PurgeExpiredAsync(now, batchSize, cancellationToken);
 }

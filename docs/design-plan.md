@@ -160,7 +160,7 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | **v0.2** | Persistence & clustering | claim, run history, janitor, instance registry, on SQL Server **and** Redis — *done*, with the Aspire host demonstrating it between real processes |
 | — | **decision point** | *resolved — see below* |
 | v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause — *done* |
-| v0.3.1 | Identity | `ICredentialStore` on both tiers, its conformance suite, login and sessions, API-token creation and revocation — §13.5 |
+| v0.3.1 | Identity | OIDC sign-in; API tokens with scopes on both tiers; their conformance suite; the key ring — *done* |
 | v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
@@ -352,6 +352,14 @@ enabled on Redis even though pub/sub delivers an edit in milliseconds. Redis pub
 fire-and-forget with no redelivery, and a scheduler that had silently stopped noticing schedule edits
 would look perfectly healthy while ignoring the dashboard.
 
+A second entry is worth recording next to it, though it needs less unpacking: an API token's expiry
+is enforced in `IApiTokenStore.FindAsync` itself, not by the caller, which is what makes it one place
+that can push the predicate into an index or a key's time-to-live. SQL folds it into the lookup query
+and the janitor's token pass deletes expired rows in batches; Redis needs no such pass, because a
+token key carries its expiry as the key's own TTL and Redis removes it unasked. Neither tier caches a
+resolved token — revocation and expiry both take effect on the next request, on every instance, which
+is what makes a store-backed token cheaper to reason about than a cached one.
+
 ---
 
 ## 12. Pause, and why it is two switches
@@ -421,13 +429,25 @@ GET  /cadence/api/runs?job=&status=&from=&to=&instance=&limit=&offset=
 GET  /cadence/api/runs/{id}              200  run detail incl. log
 GET  /cadence/api/pause                  200  { scope, reason, setBy, setAtUtc }
 PUT  /cadence/api/pause                  204
+GET  /cadence/api/auth/login             302  redirects to the provider
+POST /cadence/api/auth/logout            204  or a redirect to the provider's end-session endpoint
+GET  /cadence/api/auth/me                200  { kind, name, subject, scope }, 401 unauthenticated
+POST /cadence/api/tokens                 201  { id, name, fingerprint, scope, createdAtUtc, expiresAtUtc, token }
+GET  /cadence/api/tokens                 200  [ token summary — no secret, no digest ]
+DELETE /cadence/api/tokens/{id}          204
 ```
+
+`auth/*` mounts only where `options.Oidc` is configured; `tokens` mounts only where a store can
+persist a token — `IWritableApiTokenStore` is registered — the same condition §13.5 already turns on
+the creation endpoints for.
 
 The layering table promised "trigger / status / schedule endpoints" for this package.
 **Schedule writes are not here.**
 The two writes are not equivalent: a triggered run is loud, appears in history, and is over. A
 changed cron expression is silent and permanent, and nobody notices it until the night it does not
-run. So a token can start work and stop work, and only a person can change when work happens.
+run. So a token can start work and stop work, and only a person can change when work happens —
+and administering the credentials that do either is a person's job too, which is why the whole
+`/tokens` tree requires a user principal (§13.5).
 
 Pause is on it deliberately, and it is the one write that earns its place: an alert that halts
 scheduled work and pages a human is a real runbook, it is reversible, and §12 already scoped it.
@@ -482,32 +502,62 @@ fixed-length and token length does not leak. The scheme name is public as
 `CadenceApiDefaults.AuthenticationScheme`, because a host writing its own policy has to be able to
 name it without hardcoding a literal.
 
-Evaluated when `MapCadenceApi()` runs — startup, before the server listens:
+Evaluated when `MapCadenceApi()` runs — startup, before the server listens.
+`TokenAuthentication.IsRegistered` ORs three independent signals — a configured token, a configured
+OIDC provider, a store that can persist tokens — and `AllowUnauthenticated` overrides only the last
+of those:
 
 | Condition | Result |
 |---|---|
-| `options.RequireAuthorization("policy")` | maps; the host's policy governs |
-| one or more tokens configured | maps; built-in policy requires an authenticated `CadenceToken` |
-| `options.AllowUnauthenticated = true` | maps, warning logged **every start** |
-| none of those, `IsDevelopment()` | maps, loud warning, **loopback callers only** |
-| none of those, anything else | **throws**, naming all three remedies |
+| `options.RequireAuthorization("policy")` | maps; the host's policy governs alone, whatever else is configured |
+| one or more tokens configured | maps; built-in `ReadPolicy` requires an authenticated `CadenceToken`, `OperatePolicy` also requires `Operate` scope |
+| `options.Oidc` configured (`Authority` and `ClientId`) | maps; the same two policies also accept a signed-in user's cookie |
+| none of those, but a store can persist tokens, `AllowUnauthenticated` is false, and this is not Development | maps; the policies apply, but nothing yet satisfies them — every request is refused until an operator configures a token or a provider |
+| `options.AllowUnauthenticated = true` (and none of the three above apply) | maps, warning logged **every start**; where a store can still persist tokens the administration tree mounts anyway but refuses every caller, since it requires a user principal that this deployment shape never produces |
+| none of those, `IsDevelopment()` | maps, loud warning, **loopback callers only** — including where a store can persist tokens, which does not close this branch |
+| none of those, anything else | **throws**, naming all four remedies |
 
-The composition rule is one sentence: **a named policy governs alone, and the token scheme
-authenticates into it.** Token auth produces a principal carrying a `cadence:token` claim and the
-host's policy decides whether that is sufficient, so an app with OIDC can accept both by writing
-one policy: `MapCadenceApi` selects `options.PolicyName ?? (Tokens.Count > 0 ? Policy : null)`.
+That is seven rows on the page because the fourth is a corollary of the second and third rather than
+a distinct branch in the code — same map outcome, different log line — but it is the row that answers
+the question an operator will actually ask: *why does `UseSqlStorage()` alone not lock this down?*
+Registering a writable store is a statement about persistence, not about authentication, so it
+satisfies the gate the same way a token would — the deployment is administrable once a token
+exists — but it is the one condition that yields, both to `AllowUnauthenticated` and to Development,
+precisely because nothing has been configured yet to override. A configured token or a configured
+provider is a statement about authentication and wins regardless of either; the boot log's
+`3002`/`3003` lines are how an operator tells the two apart without reading source.
 
-**The scheme and its built-in policy are registered conditionally, and only ever together.** Both
-are wired through `AddOptions<...>().Configure<IOptions<CadenceApiOptions>>(...)` rather than at
-`AddApi` time, because whether a token exists cannot be evaluated until options bind — and
-resolving `AuthenticationOptions` *causes* that binding, which is stronger than merely deferring
-until after it. The policy is deferred on the identical condition as the scheme: a policy naming a
-scheme that was never registered is a 500 on every request, and the deployments that would hit that
-are `AllowUnauthenticated` and Development — exactly where an operator least expects a hard
-failure.
+**The Development branch is not closed by a storage package.** Every SQL and Redis deployment
+registers a writable store, so honouring that signal there would have taken row six away from all of
+them: a v0.3 deployment running Development with `UseSqlStorage()` and no token served loopback
+callers, and would have started answering 401 to everything with no credential obtainable over HTTP,
+because `/tokens` requires a user principal and a user requires a provider. In Development the signal
+therefore yields — unless the host named a policy of its own, which needs the scheme registered to
+authenticate into whatever the environment is. Outside Development the signal stands, and `3003` names
+the two remedies that exist in that configuration: configure a token, or configure a provider so
+somebody can sign in and issue one.
+
+The composition rule is one sentence: **a named policy governs alone, and Cadence's own schemes
+authenticate into it.** A token or a signed-in user's cookie produces a principal carrying
+`cadence:kind` and `cadence:scope` claims; `ReadPolicy` requires either, and `OperatePolicy` — applied
+on top of `ReadPolicy`, only for trigger and pause — additionally requires the `Operate` scope. A
+host with its own identity provider can accept both by naming `CadenceApiDefaults.AuthenticationScheme`
+among a policy's own schemes: Cadence's token scheme authenticates into that policy rather than
+bypassing it.
+
+**The schemes and their built-in policies are registered conditionally, and only ever together.**
+Both are wired through `AddOptions<...>().Configure<IOptions<CadenceApiOptions>>(...)` rather than at
+`AddApi` time, because whether a token, a provider or a writable store exists cannot be evaluated
+until options bind — and resolving `AuthenticationOptions` *causes* that binding, which is stronger
+than merely deferring until after it. The policies are deferred on the identical condition as the
+schemes: a policy naming a scheme that was never registered is a 500 on every request, and the
+deployments that would hit that are `AllowUnauthenticated` and Development — exactly where an
+operator least expects a hard failure.
 
 **The Development branch answers loopback callers only.** An endpoint filter on the group returns
-403 with a `ProblemDetails` naming all three remedies when `RemoteIpAddress` is not loopback. It is
+403 with a `ProblemDetails` naming all four remedies when `RemoteIpAddress` is not loopback — updated
+to name `CadenceApiOptions.Oidc` alongside the other three, so this refusal and the startup one agree
+rather than sending an operator down an incomplete list. It is
 applied on that branch alone — not to `AllowUnauthenticated`, where a proxy or mesh in front makes
 every legitimate caller non-loopback, and not where a policy was applied, where the request is
 already authenticated. The case it closes is `ASPNETCORE_ENVIRONMENT=Development` surviving into a
@@ -596,39 +646,137 @@ duplicate registration name where the rest of DI would just overwrite; `AddApi`'
 `AuthenticationOptions` is app-wide, so an unguarded duplicate takes the *host's* authentication
 down with Cadence's.
 
-### 13.5 Identity, and the tier that has no store
+### 13.5 Identity: OIDC for people, tokens for machines
 
-v0.3.1. The shape is already set by §8 gap #5: `ICredentialStore` and `IWritableCredentialStore`,
-because "turn off creation of users and tokens" should not be a flag that can be misconfigured. It
-is the in-memory tier not implementing the writable half.
+v0.3.1. An OIDC provider authenticates people; Cadence authenticates machines itself, with opaque
+tokens it issues and can revoke instantly. Nothing here stores a password, and nothing here is an
+environment admin — those were the original shape of this section, considered and rejected before
+any of it was built.
 
-| | No storage package | `UseSqlStorage()` / `UseRedisStorage()` |
-|---|---|---|
-| Admin | one, from the environment | persisted; the environment admin bootstraps first boot |
-| API tokens | from the environment, read-only | created, listed and revoked at runtime |
-| Creation endpoints | not mounted | mounted |
+**ASP.NET Core Identity was rejected.** `UserManager<TUser>` is generic per user type, but
+`IdentityOptions` is not — one instance per container, holding `PasswordOptions`, `LockoutOptions`,
+`UserOptions` and `SignInOptions` as sub-objects (verified against `Microsoft.Extensions.Identity.Core`
+9.0.4). Cadence is a package added to somebody else's application, and many such applications already
+call `AddIdentity<,>()`. Registering `AddIdentityCore<CadenceUser>()` alongside would configure
+*their* options object: our password length becoming theirs, our lockout policy silently changing
+their account lockout. There is no per-user-type variant to reach for instead.
 
-**A session should be an opaque token in that same store, not a JWT.** The dashboard is a browser
-client, so a JWT lives either in `localStorage`, where any XSS reads it, or in a cookie — and once
-it is in a cookie it has bought nothing, while still costing a signing key that must reach every
-replica identically and revocation that does not work, because an issued JWT cannot be withdrawn.
-The store that API tokens need already exists by then; a session is another row in it. Logout
-logs out, and there is no key to distribute.
+**EF Core was excluded.** The SQL tier is hand-written ADO with embedded scripts journalled under
+`sp_getapplock`; Identity's practical store is `Identity.EntityFrameworkCore`, and the Redis tier has
+no EF story at all. Either would have meant a second data-access technology for one feature.
 
-Three consequences of N replicas each serving the dashboard, because the rule is that nothing
-which matters may live in process memory:
+**Of the three N-replica consequences a store-backed design was expected to carry, two dissolved.**
+Sessions being store-backed survives, but is satisfied differently: the Data Protection key ring is
+shared, the ticket cookie is self-contained, so any replica reads any other's cookie with no sticky
+sessions and no session table to write to. Cache invalidation on revocation dissolved entirely —
+nothing is cached, `IApiTokenStore.FindAsync` resolves a token by a store lookup on every request, so
+revocation is instant everywhere with no change token and no window — the one thing the handler
+answers without asking the store is a value that does not have the 43-character Base64Url shape
+`ApiTokenSecret.Create()` produces, which is a format check rather than a cache, and keeps an
+unauthenticated caller from spending a seek and a pooled connection per request (§11.3 records the tier split:
+SQL folds expiry into the lookup, Redis carries it as a key TTL). Shared login rate limiting
+dissolved because there is no login: nobody posts a password to Cadence, so throttling and credential
+stuffing are the identity provider's problem, not this package's.
 
-1. **Sessions must be store-backed**, which is the argument above arriving from a second
-   direction. Sign in on one replica, get routed to another, stay signed in — with no sticky
-   sessions to configure.
-2. **Revocation has to invalidate caches.** A replica that caches credentials keeps honouring a
-   token revoked elsewhere until its cache expires — a silent window in which a withdrawn token
-   still starts jobs. §11.3's change token and pub-sub already solve exactly this for schedule
-   edits: polled on SQL, pushed on Redis, poll kept as the backstop. Reuse it rather than
-   inventing a second mechanism.
-3. **Login rate limiting has to be shared.** Per-process counters give an attacker rotating
-   across replicas N times the attempt budget, and each replica's log looks unremarkable.
-   Store-backed counters, or documented as the ingress's job — but not left implicit.
+**What was given up: server-side forced logout.** Logout clears the cookie in that browser only; an
+operator cannot terminate someone else's session, and disabling an account at the provider takes
+effect within one cookie lifetime (`CookieLifetime`, 8 hours by default) rather than immediately,
+because nothing here holds a list of live sessions to invalidate. Accepted in exchange for holding no
+per-session state at all.
+
+**SPA PKCE was considered and rejected**, even though it is genuinely less state and carries a
+tighter revocation window. It loses on engineering: silent renew needs the provider's cookie
+reachable in a third-party context, which Safari and Chrome increasingly block outright, and the
+dashboard would need a token library plus its own state, nonce, renewal and expiry handling. The XSS
+argument between the two is narrower than it looks, too — `POST /tokens` exists, so an XSS running in
+the dashboard can mint a durable token under either architecture. The control that actually matters is
+the freshness requirement on token creation (below), not where the ticket cookie sits.
+
+**Scopes.** `read` reaches the GET endpoints; `operate` adds trigger and pause, layered on top of
+`read` as a second policy (`OperatePolicy`) rather than a wider one, so a route that needs only
+`read` cannot be silently widened by a claim meant for another route. A signed-in user always carries
+`operate` — the surface has no finer grain for a person than it does for a token. A token supplied
+through configuration (`CADENCE_API_TOKEN`, `Cadence:Api:Tokens`) is `operate` and cannot be revoked
+at runtime: it has no row to delete, which is its purpose — break-glass access that survives whatever
+the store is doing.
+
+**A token cannot mint another token.** The whole `/tokens` tree requires a user principal — checked
+by one filter against the `cadence:kind` claim, so the rule cannot drift between the three handlers —
+except under a host-named policy, where that policy governs alone and Cadence's own user-principal
+rule does not apply. Under `AllowUnauthenticated` the token routes still mount, because mounting is
+decided by whether a writable store is registered, not by the gate; they refuse every caller, because
+there is no principal there to be a user, and credentials must not be administrable anonymously. That
+deployment shape can run and read jobs; it cannot administer tokens.
+
+**Under a host-named policy the tree is not mounted without a second, explicit statement.** Whether
+the routes exist depends on the store; who may reach them depends on the host's policy; and the two
+are independent. A v0.3 deployment that named a policy for reads, triggers and pause never consented
+to credential administration behind it, where anything that policy already admits — a bearer token
+included — could mint and revoke. `AllowTokenAdministrationUnderHostPolicy` is that statement, and
+without it `MapCadenceApi()` leaves the three routes unmapped and logs `3005` naming the option.
+Unmapped and not mounted-and-refusing: 404 from routing is the honest answer to a route this
+deployment does not have.
+
+**Creating a token requires a recently-authenticated user.** `TokenCreationMaxAge` (five minutes by
+default) is checked against the ticket's `auth_time` — when the user authenticated at the provider,
+not when the ticket was minted — and a stale one answers 401 with `WWW-Authenticate: CadenceCookie`
+rather than 403: the fix is one redirect back through the provider, not a permissions problem, and
+the status code says which. That redirect has to be a real re-authentication, so
+`{BasePath}/api/auth/login?prompt=login` asks the provider for one and the refusal's `detail` names
+that route. A plain challenge would not do: `auth_time` is the authentication instant, so an SSO
+re-entry answered by the provider's live session returns the same value and the same 401, and the
+advice would be a loop.
+
+**Data Protection keys live in the configured storage tier, unencrypted at rest**, protected by that
+store's own access controls — the same ones already trusted with schedules and run history.
+`ManageDataProtectionKeys` (true by default, though it only takes effect once a provider is
+configured) is what points the key ring there under the application name `Cadence`, so a ticket
+minted on one replica is readable on the next and survives a restart. It is the property that makes
+the cookie work at all under N replicas: without a shared key ring, no two replicas derive the same
+key, and each can read only the tickets it minted itself. `ProtectKeysWithCertificate` is the
+documented step for a deployment that wants more than the store's own access controls, and composes
+with this rather than replacing it.
+
+**That key ring reaches the ticket cookie and nothing else.** `DataProtectionOptions` and
+`KeyManagementOptions` are both single-instance and unnamed — the same defect class that disqualified
+ASP.NET Core Identity above — so setting the application discriminator or the XML repository on them
+would relocate the *host's* key ring and change what every payload it has already protected derives
+from, with registration order deciding which side won. Cadence therefore builds its key ring in a
+container of its own and attaches it to `CookieAuthenticationOptions.DataProtectionProvider` on its
+own scheme's named options, which is the per-scheme seam. What the host arranged for its own keys is
+carried into that container, which is what keeps `ProtectKeysWithCertificate` composing.
+
+**`Cadence.Api` now takes a hard dependency on `Microsoft.AspNetCore.Authentication.OpenIdConnect`**,
+so a token-only consumer that never configures a provider still carries it. The storage packages pay
+their own share: `Cadence.Storage.Sql` references `Microsoft.AspNetCore.DataProtection` and
+`Cadence.Storage.Redis` references `Microsoft.AspNetCore.DataProtection.StackExchangeRedis`, for the
+`IXmlRepository` each offers, so a consumer that wanted only the scheduler now pulls ASP.NET Core
+Data Protection with its storage tier. Both are small and already in the shared framework's
+dependency graph for any web host, which is the whole of the justification. The `Microsoft.*` floor
+across the solution is 10.0.11, because GHSA-9mv3-2cwr-p262 affects 10.0.0 through 10.0.6.
+
+**Sign-out reaches the provider carrying `client_id`, not `id_token_hint`.** `SaveTokens` is false —
+nothing calls a downstream API, and provider tokens in the ticket would only make the cookie overflow
+into chunks — so the ticket has no `id_token` to hint with. RP-Initiated Logout 1.0 permits
+`client_id` in its place, and a provider that insists on one of the two now gets one. The consequence
+a reader needs: the provider shows its own logout confirmation (or, for a provider that treats a
+missing `id_token_hint` as an error regardless, a refusal page) rather than signing out silently —
+observed against Keycloak in `samples/README.md` step 9.
+
+**A provider-initiated sign-out must name the session it is ending.** `RemoteSignOutPath`
+(`{BasePath}/signout-oidc`) is handled by the OIDC handler inside the authentication middleware,
+before routing, so no endpoint filter reaches it and §4.5's session-header rule does not cover it.
+The framework skips its own `sid` comparison when the request carries no `sid`, which left an
+`<img src="…/signout-oidc">` on any page able to sign an operator out. `OnRemoteSignOut` now requires
+a `sid` that matches the current ticket's — which is why `sid` is on §4.3's allow-list — and answers
+400 otherwise.
+
+**The realm's post-logout redirect is `{BasePath}/signout-callback-oidc`**, not
+`SignedOutRedirectUri` (`/cadence`). The callback path is the leg the provider itself redirects back
+to and must have registered; the redirect URI is a hop Cadence makes afterward, from its own callback
+handler, which the provider never sees. Registering the redirect URI instead yields a Keycloak 400 —
+gotten wrong once while building this, and `samples/README.md`'s realm table already carries the
+correction, which this section must not contradict.
 
 ### 13.6 The topology the trigger forces
 

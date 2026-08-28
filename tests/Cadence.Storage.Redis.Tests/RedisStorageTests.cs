@@ -49,6 +49,49 @@ public sealed class RedisStorageTests : IAsyncDisposable
     }
 
     [SkippableFact]
+    public async Task TokenExpiryIsTheKeyTimeToLive()
+    {
+        // Both halves of the tier's expiry decision. A token with an expiry gets a TTL, so it stops
+        // existing rather than failing a predicate somebody could forget; a token without one gets
+        // no TTL at all, or it would disappear on its own. The listing at the end is the third
+        // effect of the same atomic write: an index entry, without which neither token could be
+        // revoked.
+        var options = _fixture.CreateOptions("tokenttl");
+        var connection = Track(new RedisConnection(options));
+        var store = new RedisApiTokenStore(connection, new FixedClock());
+
+        var (_, expiring) = ApiTokenSecret.Create();
+        var (_, permanent) = ApiTokenSecret.Create();
+
+        await store.CreateAsync(
+            new ApiTokenCreation(
+                "expiring", ApiTokenScope.Read, DateTimeOffset.UtcNow.AddHours(1), null, null),
+            expiring,
+            default);
+
+        await store.CreateAsync(
+            new ApiTokenCreation("permanent", ApiTokenScope.Read, null, null, null),
+            permanent,
+            default);
+
+        var database = await connection.GetDatabaseAsync();
+
+        var ttlOfExpiring = await database.KeyTimeToLiveAsync(
+            connection.Keys.Token(Convert.ToHexStringLower(expiring)));
+
+        Assert.NotNull(ttlOfExpiring);
+        // Generously bounded either side of the hour: the TTL is resolved against the server's
+        // clock and reported to the millisecond, so an exact bound would flake on a little skew.
+        Assert.InRange(
+            ttlOfExpiring.Value, TimeSpan.FromMinutes(55), TimeSpan.FromMinutes(65));
+
+        Assert.Null(await database.KeyTimeToLiveAsync(
+            connection.Keys.Token(Convert.ToHexStringLower(permanent))));
+
+        Assert.Equal(2, (await store.ListAsync(default)).Count);
+    }
+
+    [SkippableFact]
     public async Task TheClaimIsTheRun()
     {
         // The property the design plan asks of any coordinator: no window in which a slot is taken

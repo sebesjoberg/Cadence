@@ -1,5 +1,6 @@
 using Cadence.DependencyInjection;
 using Cadence.Storage.Sql.Internal;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -101,6 +102,23 @@ public static class CadenceSqlStorageExtensions
             sp.GetRequiredService<SqlDatabase>(),
             sp.GetRequiredService<ISystemClock>())));
 
+        // Concrete type too, because the janitor's expired-token pass is internal to the store
+        // rather than on the interface -- the same shape SqlRunHistoryStore already uses.
+        services.TryAddSingleton(sp => new SqlApiTokenStore(
+            sp.GetRequiredService<SqlDatabase>(),
+            sp.GetRequiredService<ISystemClock>()));
+
+        services.Replace(ServiceDescriptor.Singleton<IApiTokenStore>(
+            sp => sp.GetRequiredService<SqlApiTokenStore>()));
+
+        services.Replace(ServiceDescriptor.Singleton<IWritableApiTokenStore>(
+            sp => sp.GetRequiredService<SqlApiTokenStore>()));
+
+        // Offered rather than applied: AddApi decides whether Data Protection uses it, which is
+        // what keeps this package free of a reference to Cadence.Api.
+        services.TryAddSingleton<IXmlRepository>(sp =>
+            new SqlXmlRepository(sp.GetRequiredService<SqlDatabase>()));
+
         // Registration order is start order for hosted services, and UseSqlStorage is called from
         // inside the AddCadence callback -- which runs before AddCadence registers the scheduler.
         // So the schema is in place before the first tick tries to claim anything.
@@ -117,10 +135,11 @@ public static class CadenceSqlStorageExtensions
 
         // The janitor itself lives in Core: reap before purge, batch, never escalate a failure into
         // a scheduling problem is policy no storage tier should be restating. What the SQL tier
-        // supplies is the four operations and the three numbers they need.
+        // supplies is the five operations and the three numbers they need.
         services.TryAddSingleton<IStorageMaintenance>(sp => new SqlStorageMaintenance(
             sp.GetRequiredService<SqlDatabase>(),
-            sp.GetRequiredService<SqlRunHistoryStore>()));
+            sp.GetRequiredService<SqlRunHistoryStore>(),
+            sp.GetRequiredService<SqlApiTokenStore>()));
 
         services.TryAddSingleton(sp =>
         {

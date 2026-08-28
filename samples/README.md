@@ -4,7 +4,7 @@
 |---|---|
 | `Cadence.Sample.Worker` | The telemetry fan-out, on the zero-infrastructure path. One job, in-memory stores, OTel to the console. |
 | `Cadence.Sample.ClusteredWorker` | The deployable shape: Core, a storage tier and the control surface in **one** web host. Launched by one of the two AppHosts, not directly. |
-| `Cadence.Sample.AppHost.Sql` | Aspire, a SQL Server container, and three replicas of that host behind one proxied endpoint. |
+| `Cadence.Sample.AppHost.Sql` | Aspire, a SQL Server container, a Keycloak container, and three replicas of that host behind one proxied endpoint. |
 | `Cadence.Sample.AppHost.Redis` | The same three replicas, the same walkthrough, against a Redis container. **The store is the only difference.** |
 
 The last two are a matched pair. They launch the same worker project, register the same three jobs,
@@ -93,11 +93,13 @@ the check that all four pack correctly.
 
 ```powershell
 ./scripts/pack.ps1
-dotnet run --project samples/Cadence.Sample.AppHost.Sql      # dashboard on :17059
-dotnet run --project samples/Cadence.Sample.AppHost.Redis    # dashboard on :17060
+dotnet run --project samples/Cadence.Sample.AppHost.Sql      # dashboard :17059, worker :5080, Keycloak :8080
+dotnet run --project samples/Cadence.Sample.AppHost.Redis    # dashboard :17060, worker :5081, Keycloak :8081
 ```
 
-The dashboard ports differ so both can run at once, which is how the comparison below was measured.
+Every port differs between the two so both can run at once, which is how the comparison below was
+measured.
+
 Each AppHost prints its dashboard URL with a login token; that dashboard is the UI here, and Cadence
 tags every log record, span and metric with `JobName`, `RunId` and `InstanceId`, so "which replica ran
 what" is answerable without `Cadence.Dashboard`, which is v0.4.
@@ -112,12 +114,14 @@ Three jobs run on every replica:
 
 ### The endpoint is proxied, and that is the point
 
-Aspire puts one proxy in front of the three replicas and picks the port itself. **There is no fixed
-port** — three replicas cannot all bind one, and the spread across replicas you get in exchange is
-this sample's most useful demonstration. Read the port off the `worker` resource in the dashboard:
+Aspire puts one proxy in front of the three replicas, and the replicas never bind that port
+themselves — the proxy does, which is what lets the AppHost fix it. It does, at `:5080` for the SQL
+pair and `:5081` for the Redis one, because Keycloak matches a client's redirect URIs literally and
+cannot be handed a port Aspire picked at startup. The spread across replicas behind that one port is
+unchanged, and is still this sample's most useful demonstration.
 
 ```powershell
-$b = 'http://localhost:64934'    # yours will differ
+$b = 'http://localhost:5080'     # :5081 for the Redis AppHost
 $t = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
 ```
 
@@ -430,9 +434,9 @@ dotnet run --project samples/Cadence.Sample.ClusteredWorker --no-launch-profile
 ```
 Unhandled exception. Cadence.CadenceStartupException: MapCadenceApi() refuses to map outside
 Development because nothing would authenticate it. Supply a token (CADENCE_API_TOKEN, or
-Cadence:Api:Tokens), or name an authorization policy with CadenceApiOptions.RequireAuthorization,
-or — if something in front of this application already authenticates callers — set
-CadenceApiOptions.AllowUnauthenticated.
+Cadence:Api:Tokens), configure CadenceApiOptions.Oidc, or name an authorization policy with
+CadenceApiOptions.RequireAuthorization, or — if something in front of this application already
+authenticates callers — set CadenceApiOptions.AllowUnauthenticated.
    at Cadence.Api.CadenceApiEndpointExtensions.MapCadenceApi(IEndpointRouteBuilder endpoints)
 ```
 
@@ -448,9 +452,152 @@ info: Cadence.Api[3002] Cadence's API accepted 1 token(s): 0 set in code, 0 from
 
 That is the line to read when a token that ought to work does not.
 
+### 9. Signing in through Keycloak, across three replicas
+
+Everything above was a token. This is the other half of v0.3.1: a person, authenticated by a real
+identity provider, holding a cookie that all three replicas can read.
+
+Both AppHosts start `quay.io/keycloak/keycloak:26.7.2` alongside the store, in `start-dev` on the
+image's embedded database, and import
+[`samples/keycloak/cadence-realm.json`](keycloak/cadence-realm.json) on every boot. JSON has no
+comments, so what is in it belongs here:
+
+| In the realm | Value | Why |
+|---|---|---|
+| Realm | `cadence` | issuer `http://localhost:8080/realms/cadence`, or `:8081` on the Redis AppHost |
+| Client | `cadence-dashboard`, confidential, standard flow only | Cadence is a server-side client and holds a secret; there is no implicit or password grant to enable |
+| Secret | `cadence-dashboard-secret` | in the file on purpose, like the `deadbeef` token: the right shape, obviously not a secret |
+| Redirect URIs | `http://localhost:5080/cadence/signin-oidc` and `:5081` | the callback is under `BasePath`, not at the framework's `/signin-oidc`, so a realm copied from a tutorial names the wrong path |
+| Post-logout URIs | `http://localhost:5080/cadence/signout-callback-oidc` and `:5081` | the *provider's* return leg, not `SignedOutRedirectUri` — the browser reaches `/cadence` one hop later |
+| Realm role | `cadence-operator` | mapped into the ID token as a flat `cadence_role` claim, because Keycloak's default `realm_access.roles` is nested JSON no claim comparison can read |
+| User | `admin` / `admin123!`, holding that role | the claim is checked in `OnTokenValidated`, so a user without it is refused at the callback and never holds a session |
+| That user's profile | `Cadence Admin`, `admin@cadence.invalid` | Keycloak's `VERIFY_PROFILE` action interrupts the first sign-in of a user with no name or email, so a stripped-down user meets an Update Account Information form instead of the callback |
+
+The worker gets the authority, client id and secret as `CADENCE_OIDC_*` from the Keycloak resource,
+and names the role itself:
+
+```csharp
+api.Oidc.RequiredClaimType = "cadence_role";
+api.Oidc.RequiredClaimValue = "cadence-operator";
+```
+
+Leaving that pair null is legal and `MapCadenceApi()` warns about it, because it means every user
+Keycloak authenticates may trigger jobs and pause the cluster. A sample should not demonstrate the
+configuration the product warns about.
+
+**Sign in.** Open `$b/cadence/api/auth/login` in a browser, and Keycloak asks for `admin` /
+`admin123!`. You land back on `$b/cadence`, which is a 404 until `Cadence.Dashboard` in v0.4, holding
+a `cadence.session` cookie. Copy its value out of devtools:
+
+```powershell
+$s = '<the cadence.session value>'
+$h = @('-H', "Cookie: cadence.session=$s", '-H', 'X-Cadence-Session: 1')
+curl.exe -s @h "$b/cadence/api/auth/me"
+```
+
+```json
+{"kind":"user","name":"Cadence Admin","subject":"bb1ae66d-02fa-433e-9b17-9e3f8930c8c0","scope":"Operate"}
+```
+
+`kind` is `user` rather than `token`, and the scope is `Operate`: the surface has no finer grain for
+a person. The subject is Keycloak's, and the ticket carries nothing else — no groups, no directory
+attributes, no provider tokens. `X-Cadence-Session` is not optional: the same request without it
+answers 401, because a cookie a cross-site form could send is a cookie Cadence will not honour.
+
+**Now the part that needs three replicas.** Trigger with the cookie instead of the token:
+
+```powershell
+1..6 | ForEach-Object { curl.exe -s -X POST @h "$b/cadence/api/jobs/tick-tock/trigger"; Start-Sleep -Milliseconds 500 }
+```
+
+```json
+{"runId":"42290df8-3118-4a25-838f-e6a879cb85e0","jobName":"tick-tock","instanceId":"worker-zmprvdnv"}
+{"runId":"81166499-5d99-4c34-aedd-7405161e37b3","jobName":"tick-tock","instanceId":"worker-zmprvdnv"}
+{"runId":"8ec207ab-74d1-4a06-a4a6-42b0d42cfd46","jobName":"tick-tock","instanceId":"worker-hgwbxnxw"}
+{"runId":"ed1748bd-cefb-4822-beca-994c1f953f88","jobName":"tick-tock","instanceId":"worker-bgnrqmsr"}
+{"runId":"d8e9858a-c1b6-42bd-bf83-aed9c81c7925","jobName":"tick-tock","instanceId":"worker-bgnrqmsr"}
+{"runId":"2ccb81cf-a771-4c14-b6b1-1d4ed1b04e2a","jobName":"tick-tock","instanceId":"worker-bgnrqmsr"}
+```
+
+Three replica ids across six requests, one cookie, and nobody signed in three times. The spread is
+the proxy's, assigned per connection rather than per request, exactly as in step 2.
+
+The ticket is encrypted with a Data Protection key, and `ManageDataProtectionKeys` puts that key
+ring in the store the schedules and run history are already in, under the application name
+`Cadence` — so the replica that minted the ticket and the replica that reads it derive the same
+key. Three containers or three pods is where that is load-bearing; on one developer machine the
+host's own default key directory is shared anyway, which is why this is the property a deployment
+has to test and a laptop cannot fail.
+
+**Mint a token.** A signed-in user is how API tokens are issued, and the scope is where the coarse
+grain of a cookie gets narrowed. Only a *recently* signed-in one: `TokenCreationMaxAge` is five
+minutes, and a ticket older than that answers 401 with `WWW-Authenticate: CadenceCookie` rather than
+403, because the fix is one redirect — to `/cadence/api/auth/login?prompt=login`, which the refusal
+names and which makes Keycloak ask for the password again instead of handing back the same
+`auth_time`.
+
+```powershell
+curl.exe -s @h -H "Content-Type: application/json" -X POST "$b/cadence/api/tokens" -d '{"name":"reader","scope":"Read"}'
+```
+
+```json
+{"id":"b308a8d1-3370-47f2-9c37-536bc1d5b26b","name":"reader","fingerprint":"ba0b68d5","scope":"Read","createdAtUtc":"2026-08-28T06:11:26.6352369+00:00","token":"9fpNgd9HXytMMpZ1Gz8zp1SndanKXZdqOcfInvY6x5Y"}
+```
+
+The value appears exactly once. Read works, trigger does not:
+
+```powershell
+$r = '9fpNgd9HXytMMpZ1Gz8zp1SndanKXZdqOcfInvY6x5Y'
+curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $r" "$b/cadence/api/jobs"
+curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $r" -X POST "$b/cadence/api/jobs/tick-tock/trigger"
+```
+
+```
+200
+403
+```
+
+403 and not 401, unlike a wrong token: this one authenticated fine and then failed authorization,
+which is the distinction the two status codes exist to make. Mint an `Operate` one, keeping its id
+and value, and the same request is accepted:
+
+```powershell
+$t2 = curl.exe -s @h -H "Content-Type: application/json" -X POST "$b/cadence/api/tokens" -d '{"name":"deploy-pipeline","scope":"Operate"}' | ConvertFrom-Json
+curl.exe -s -H "Authorization: Bearer $($t2.token)" -X POST "$b/cadence/api/jobs/tick-tock/trigger"
+```
+
+```json
+{"runId":"737dfa1d-bf4a-4b28-9fd4-6b5d8fc350a8","jobName":"tick-tock","instanceId":"worker-hgwbxnxw"}
+```
+
+Then revoke it, with the cookie again, and try once more:
+
+```powershell
+curl.exe -s -o NUL -w "%{http_code}`n" @h -X DELETE "$b/cadence/api/tokens/$($t2.id)"
+curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $($t2.token)" -X POST "$b/cadence/api/jobs/tick-tock/trigger"
+```
+
+```
+204
+401
+```
+
+**Immediately, and on every replica.** There is no cache to expire and no token lifetime to wait
+out: the handler hashes the presented value and asks the store, so revocation is a row the next
+request does not find. Back to 401 rather than 403, because a revoked token authenticates nobody.
+
+**What this sample does that a real realm must not.** `sslRequired` is `none` and Keycloak serves
+plain HTTP, so the worker sets `Oidc.RequireHttpsMetadata = false`, in `Development` only — a
+deployment leaves it at its default. The client secret and the user's password are checked in.
+
+That is the whole list. Signing out is *not* on it: Cadence names the client on the end-session
+request for every provider, because the ticket carries no `id_token` to hint with and RP-Initiated
+Logout permits `client_id` in its place. Keycloak refuses the request outright without one, which is
+how that came to be Cadence's behaviour rather than this sample's.
+
 ## What actually differs
 
-Everything above was driven against both samples with the same script, and steps 1 to 8 came back
+Everything above was driven against both samples with the same script, and every step came back
 the same on both: same status codes, same problem documents, same `instanceId` spread, one run per
 occurrence on both. That is the claim worth making, and the conformance suite is what keeps it true.
 

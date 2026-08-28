@@ -188,3 +188,65 @@ public sealed class RedisPauseStoreConformanceTests : PauseStoreConformance, IAs
         }
     }
 }
+
+/// <summary>
+/// Runs the shared token contract against Redis.
+/// </summary>
+/// <remarks>
+/// Expiry is a key time-to-live here, so this binding has no clock to move. <c>AdvanceAsync</c>
+/// makes Redis drop what the horizon would have dropped, which is also what keeps the test instant.
+/// </remarks>
+[Collection(RedisCollectionDefinition.Name)]
+public sealed class RedisApiTokenStoreConformanceTests : ApiTokenStoreConformance, IAsyncDisposable
+{
+    private readonly RedisFixture _fixture;
+    private readonly List<RedisConnection> _connections = [];
+
+    private RedisStorageOptions? _shared;
+
+    public RedisApiTokenStoreConformanceTests(RedisFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override Task<IApiTokenStore> CreateAsync()
+    {
+        // One key space per test, shared by every store the test creates, so "another instance"
+        // means another instance rather than another key space.
+        _shared ??= _fixture.CreateOptions("tokens");
+
+        var connection = new RedisConnection(_shared);
+        _connections.Add(connection);
+
+        return Task.FromResult<IApiTokenStore>(
+            new RedisApiTokenStore(connection, new FixedClock()));
+    }
+
+    /// <inheritdoc />
+    protected override async Task AdvanceAsync(IApiTokenStore store, TimeSpan by)
+    {
+        // Every store this test made shares one key space, so any of their connections will do.
+        var connection = _connections[0];
+        var keys = connection.Keys;
+        var database = await connection.GetDatabaseAsync();
+
+        foreach (var entry in await database.HashGetAllAsync(keys.Tokens))
+        {
+            var key = keys.Token((string)entry.Value!);
+
+            // Only keys that carry a TTL, so advancing a clock cannot expire a token that was
+            // created without an expiry.
+            if (await database.KeyTimeToLiveAsync(key) is not null)
+            {
+                await database.KeyExpireAsync(key, DateTime.UtcNow.AddSeconds(-1));
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var connection in _connections)
+        {
+            await connection.DisposeAsync();
+        }
+    }
+}

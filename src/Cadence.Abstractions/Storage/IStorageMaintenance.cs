@@ -90,4 +90,19 @@ public interface IStorageMaintenance
         DateTimeOffset olderThan,
         int batchSize,
         CancellationToken cancellationToken);
+
+    /// <summary>Deletes API tokens whose expiry has passed.</summary>
+    /// <remarks>
+    /// A tier whose keys carry a time-to-live has nothing to do here and returns zero. An expired
+    /// token already stops resolving — <see cref="IApiTokenStore.FindAsync"/> enforces that — so
+    /// this pass reclaims space rather than closing a security gap, which is why it runs last.
+    /// </remarks>
+    /// <param name="now">Tokens whose expiry precedes this are eligible.</param>
+    /// <param name="batchSize">How many records to delete per operation.</param>
+    /// <param name="cancellationToken">Cancels the purge.</param>
+    /// <returns>How many tokens were deleted.</returns>
+    Task<int> PurgeExpiredApiTokensAsync(
+        DateTimeOffset now,
+        int batchSize,
+        CancellationToken cancellationToken);
 }

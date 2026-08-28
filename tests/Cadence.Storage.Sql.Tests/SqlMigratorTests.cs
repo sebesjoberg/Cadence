@@ -51,6 +51,43 @@ public sealed class SqlMigratorTests
     }
 
     [SkippableFact]
+    public async Task TheIdentityScriptIsAppliedAndJournalled()
+    {
+        var options = await _fixture.CreateMigratedAsync("migrateidentity");
+        var database = new SqlDatabase(options);
+
+        var applied = await database.ScalarAsync<int>(
+            $"""
+            SELECT COUNT(*) FROM {database.Table("CadenceSchemaVersion")}
+            WHERE ScriptName LIKE '003%';
+            """,
+            bind: null,
+            default);
+
+        Assert.Equal(1, applied);
+
+        foreach (var table in new[] { "CadenceApiToken", "CadenceDataProtectionKey" })
+        {
+            var rows = await database.ScalarAsync<int>(
+                $"SELECT COUNT(*) FROM {database.Table(table)};", bind: null, default);
+
+            Assert.Equal(0, rows);
+        }
+
+        // The unique digest index is what makes resolution one seek; a table without it would pass
+        // every conformance test and scan on every authenticated request.
+        var index = await database.ScalarAsync<int>(
+            """
+            SELECT COUNT(*) FROM sys.indexes
+            WHERE name = N'UX_CadenceApiToken_Digest' AND is_unique = 1;
+            """,
+            bind: null,
+            default);
+
+        Assert.Equal(1, index);
+    }
+
+    [SkippableFact]
     public async Task MigratingTwiceChangesNothing()
     {
         var options = await _fixture.CreateMigratedAsync("twice");

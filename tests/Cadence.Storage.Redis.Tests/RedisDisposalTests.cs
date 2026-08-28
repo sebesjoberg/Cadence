@@ -31,4 +31,24 @@ public sealed class RedisDisposalTests
 
         Assert.Null(thrown);
     }
+
+    [Fact]
+    public async Task TheTokenStoreWinsBothInterfacesAsOneSingleton()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCadence(cadence => cadence.UseRedisStorage(Unreachable));
+
+        // Await using, not using: RedisConnection is async-disposable only, so a synchronous
+        // disposal of the container throws -- which is the sibling test's whole subject.
+        await using var provider = services.BuildServiceProvider();
+
+        // IsType, not IsAssignableFrom: AddCadence offers ConfiguredApiTokenStore for IApiTokenStore,
+        // and a tier that persists tokens it cannot then resolve would fail nowhere else.
+        var read = Assert.IsType<RedisApiTokenStore>(provider.GetRequiredService<IApiTokenStore>());
+        var writable = Assert.IsType<RedisApiTokenStore>(
+            provider.GetRequiredService<IWritableApiTokenStore>());
+
+        Assert.Same(read, writable);
+    }
 }

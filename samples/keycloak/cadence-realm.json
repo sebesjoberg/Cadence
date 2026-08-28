@@ -1,0 +1,83 @@
+{
+  "realm": "cadence",
+  "displayName": "Cadence samples",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginTheme": "keycloak",
+  "roles": {
+    "realm": [
+      {
+        "name": "cadence-operator",
+        "description": "May reach the Cadence control surface."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "cadence-dashboard",
+      "name": "Cadence dashboard",
+      "description": "The clustered worker's control surface.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "cadence-dashboard-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": false,
+      "frontchannelLogout": false,
+      "redirectUris": [
+        "http://localhost:5080/cadence/signin-oidc",
+        "http://localhost:5081/cadence/signin-oidc"
+      ],
+      "webOrigins": [
+        "http://localhost:5080",
+        "http://localhost:5081"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:5080/cadence/signout-callback-oidc##http://localhost:5081/cadence/signout-callback-oidc"
+      },
+      "protocolMappers": [
+        {
+          "name": "cadence-role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "cadence_role",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "usermodel.realmRoleMapping.rolePrefix": "",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Cadence",
+      "lastName": "Admin",
+      "email": "admin@cadence.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "cadence-operator"
+      ]
+    }
+  ]
+}

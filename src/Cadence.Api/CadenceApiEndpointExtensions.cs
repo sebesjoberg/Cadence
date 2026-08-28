@@ -1,4 +1,5 @@
 using Cadence.Api.Internal;
+using Cadence.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -14,9 +15,10 @@ public static class CadenceApiEndpointExtensions
 {
     private const string GateFailureMessage =
         "MapCadenceApi() refuses to map outside Development because nothing would authenticate it. " +
-        "Supply a token (CADENCE_API_TOKEN, or Cadence:Api:Tokens), or name an authorization policy " +
-        "with CadenceApiOptions.RequireAuthorization, or — if something in front of this application " +
-        "already authenticates callers — set CadenceApiOptions.AllowUnauthenticated.";
+        "Supply a token (CADENCE_API_TOKEN, or Cadence:Api:Tokens), configure CadenceApiOptions.Oidc, " +
+        "or name an authorization policy with CadenceApiOptions.RequireAuthorization, or — if " +
+        "something in front of this application already authenticates callers — set " +
+        "CadenceApiOptions.AllowUnauthenticated.";
 
     /// <summary>
     /// Maps the machine-callable endpoints — trigger, reads and pause. Schedule writes are
@@ -36,7 +38,17 @@ public static class CadenceApiEndpointExtensions
         var environment = services.GetRequiredService<IHostEnvironment>();
 
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Cadence.Api");
-        var authenticated = options.PolicyName is not null || options.Tokens.Count > 0;
+
+        // A named policy governs alone: no host policy is what leaves scopes to Cadence's own
+        // policies below, and it is also what lets the token tree's own user-principal check apply.
+        var noHostPolicy = options.PolicyName is null;
+
+        // Cadence's own scheme and policies, on the identical condition AddApi registered them on.
+        var tokenPolicies = noHostPolicy
+            && TokenAuthentication.IsRegistered(
+                options, services.GetRequiredService<IApiTokenStore>(), environment);
+
+        var authenticated = options.PolicyName is not null || tokenPolicies;
         var loopbackOnly = false;
 
         // Nested on !authenticated so that AllowUnauthenticated set alongside a token or a policy
@@ -59,6 +71,12 @@ public static class CadenceApiEndpointExtensions
                 loopbackOnly = true;
             }
         }
+        else if (options.AllowUnauthenticated)
+        {
+            // Set and overridden. 3001 would contradict the request path, but silence reads as
+            // agreement -- and an operator who set this and gets 401s has no line to look at.
+            logger.AuthenticationDisabledButIgnored(options.BasePath);
+        }
 
         // Only when tokens exist: "0 tokens" on every start of an AllowUnauthenticated deployment is
         // noise, not diagnostics. Gated on the tokens rather than on the per-source counts, because
@@ -74,21 +92,45 @@ public static class CadenceApiEndpointExtensions
                 sources.FromConfiguration,
                 sources.FromEnvironment);
         }
+        else if (tokenPolicies && !options.Oidc.IsConfigured)
+        {
+            // tokenPolicies with no configured token and no OIDC means only a writable store
+            // registered the scheme (see TokenAuthentication.IsRegistered) -- the already-computed
+            // flag, not a fresh read of the store.
+            logger.MappedWithNoTokensIssued(options.BasePath);
+        }
 
-        var group = endpoints.MapGroup($"{options.BasePath.TrimEnd('/')}/api");
+        var prefix = options.ApiPath;
+        var group = endpoints.MapGroup(prefix);
 
-        // A host policy governs alone when it names one. Otherwise the built-in policy is applied
-        // only when a token exists, because AddApi registers that policy on the same condition —
-        // applying it without one would authenticate against a scheme that is not there, which is a
-        // 500 on every request in exactly the deployments that expect none. AllowUnauthenticated
-        // and the Development case apply no policy at all: that is what those flags mean.
+        // §4.5's CSRF rule, on every route a ticket can reach: a cookie without the header is
+        // refused whatever policy admitted the request.
+        if (options.Oidc.IsConfigured)
+        {
+            group.AddEndpointFilter<SessionHeaderFilter>();
+
+            if (options.Oidc.RequiredClaimType is null)
+            {
+                logger.OidcHasNoRequiredClaim();
+            }
+
+            // A sibling group, because login has to answer a caller who has no ticket yet and /me
+            // authenticates its own caller: neither can sit behind the policy applied below.
+            AuthEndpoints.Map(endpoints.MapGroup($"{prefix}/auth"), options.EffectivePath);
+        }
+
+        // A host policy governs alone when it names one. Otherwise the built-in policies are applied
+        // only where AddApi registered them — applying one without that would authenticate against a
+        // scheme that is not there, which is a 500 on every request in exactly the deployments that
+        // expect none. AllowUnauthenticated and the Development case apply no policy at all: that is
+        // what those flags mean.
         if (options.PolicyName is { } policyName)
         {
             group.RequireAuthorization(policyName);
         }
-        else if (options.Tokens.Count > 0)
+        else if (tokenPolicies)
         {
-            group.RequireAuthorization(CadenceTokenDefaults.Policy);
+            group.RequireAuthorization(CadenceTokenDefaults.ReadPolicy);
         }
         else if (loopbackOnly)
         {
@@ -115,10 +157,37 @@ public static class CadenceApiEndpointExtensions
         // package's own source-generated context — and that type contributes no metadata of its own.
         // Each route below therefore declares its statuses and shapes with .Produces<T>(), which is
         // what a host's AddOpenApi() reads; without it the document would list empty schemas.
-        JobEndpoints.Map(group);
+        //
+        // Trigger and pause additionally require Operate, and only where no host policy was named: a
+        // named policy governs alone, so scopes are then its owner's business. Each declares the 403
+        // that brings, typed as the 401 above because that refusal carries no body either.
+        JobEndpoints.Map(group, tokenPolicies);
         RunEndpoints.Map(group);
-        PauseEndpoints.Map(group);
+        PauseEndpoints.Map(group, tokenPolicies);
         HealthEndpoints.Map(group);
+
+        // Mounted on the container, not on a flag: a deployment with no storage package cannot persist a
+        // token, so the routes are absent and routing answers 404 -- rather than a handler that mounted
+        // and then apologised.
+        //
+        // Under a host-named policy that takes a second, explicit statement. Mounting depends on the
+        // store and governing depends on the policy, and the operator who wrote a policy for reads and
+        // triggers did not thereby ask for credential administration behind it.
+        if (services.GetService<IWritableApiTokenStore>() is not null)
+        {
+            if (noHostPolicy)
+            {
+                TokenEndpoints.Map(group, requireUserPrincipal: true);
+            }
+            else if (options.AllowTokenAdministrationUnderHostPolicy)
+            {
+                TokenEndpoints.Map(group, requireUserPrincipal: false);
+            }
+            else
+            {
+                logger.TokenAdministrationNotMounted(options.BasePath, options.PolicyName!);
+            }
+        }
 
         return group;
     }

@@ -1,4 +1,5 @@
 using Cadence.DependencyInjection;
+using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -134,6 +135,19 @@ public class RegistrationTests
             .AddJobsFromAssemblyOf<AttributedJob>());
 
         Assert.Single(registry.All, d => d.ImplementationType == typeof(AttributedJob));
+    }
+
+    [Fact]
+    public void AddCadenceRegistersTheConfiguredTokenStore()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCadence(_ => { });
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<ConfiguredApiTokenStore>(provider.GetRequiredService<IApiTokenStore>());
+        Assert.Null(provider.GetService<IWritableApiTokenStore>());
     }
 
     private static IJobRegistry BuildRegistry(Action<CadenceBuilder> configure)

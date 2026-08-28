@@ -70,3 +70,5 @@ desktop.ini
 ## README links into it. What stays out is working scratch: implementation plans and agent notes
 ## live outside the repository entirely, and anything dropped here for a single task stays local.
 docs/scratch/
+docs/superpowers/
+.superpowers/

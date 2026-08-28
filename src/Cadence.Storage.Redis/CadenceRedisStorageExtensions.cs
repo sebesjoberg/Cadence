@@ -1,5 +1,7 @@
 using Cadence.DependencyInjection;
 using Cadence.Storage.Redis.Internal;
+using Microsoft.AspNetCore.DataProtection.Repositories;
+using Microsoft.AspNetCore.DataProtection.StackExchangeRedis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -102,6 +104,30 @@ public static class CadenceRedisStorageExtensions
         services.Replace(ServiceDescriptor.Singleton<IPauseStore>(sp => new RedisPauseStore(
             sp.GetRequiredService<RedisConnection>(),
             sp.GetRequiredService<ISystemClock>())));
+
+        // Concrete type plus both interfaces, so one instance answers the request path and the
+        // administer half -- the shape RedisScheduleSource already uses above.
+        services.TryAddSingleton(sp => new RedisApiTokenStore(
+            sp.GetRequiredService<RedisConnection>(),
+            sp.GetRequiredService<ISystemClock>()));
+
+        services.Replace(ServiceDescriptor.Singleton<IApiTokenStore>(
+            sp => sp.GetRequiredService<RedisApiTokenStore>()));
+
+        services.Replace(ServiceDescriptor.Singleton<IWritableApiTokenStore>(
+            sp => sp.GetRequiredService<RedisApiTokenStore>()));
+
+        // Offered rather than applied: AddApi decides whether Data Protection uses it, which is
+        // what keeps this package free of a reference to Cadence.Api. The key ring rides on the
+        // multiplexer this tier already opened.
+        services.TryAddSingleton<IXmlRepository>(sp =>
+        {
+            var connection = sp.GetRequiredService<RedisConnection>();
+
+            return new RedisXmlRepository(
+                () => connection.GetDatabaseAsync().GetAwaiter().GetResult(),
+                connection.Keys.DataProtectionKeys);
+        });
 
         // No schema initialiser, and nothing to migrate. Redis creates a key when it is first
         // written, which removes the whole question the SQL tier answers with a migrator, an

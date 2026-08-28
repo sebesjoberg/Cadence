@@ -16,7 +16,8 @@ internal static class JobEndpoints
 {
     /// <summary>Maps the job routes onto an already-policied group.</summary>
     /// <param name="group">The group the control surface mounts under.</param>
-    public static void Map(IEndpointRouteBuilder group)
+    /// <param name="requireOperate">Whether the trigger route requires Cadence's Operate policy.</param>
+    public static void Map(IEndpointRouteBuilder group, bool requireOperate)
     {
         group.MapGet("/jobs", ListAsync)
             .Produces<IReadOnlyList<JobSummaryResponse>>();
@@ -25,11 +26,17 @@ internal static class JobEndpoints
             .Produces<JobDetailResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        group.MapPost("/jobs/{name}/trigger", TriggerAsync)
+        var trigger = group.MapPost("/jobs/{name}/trigger", TriggerAsync)
             .Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        if (requireOperate)
+        {
+            trigger.RequireAuthorization(CadenceTokenDefaults.OperatePolicy)
+                .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
+        }
     }
 
     private static async Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> TriggerAsync(

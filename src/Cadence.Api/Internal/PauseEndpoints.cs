@@ -16,14 +16,21 @@ internal static class PauseEndpoints
 
     /// <summary>Maps the pause routes onto an already-policied group.</summary>
     /// <param name="group">The group the control surface mounts under.</param>
-    public static void Map(IEndpointRouteBuilder group)
+    /// <param name="requireOperate">Whether the write requires Cadence's Operate policy.</param>
+    public static void Map(IEndpointRouteBuilder group, bool requireOperate)
     {
         group.MapGet("/pause", GetAsync)
             .Produces<PauseResponse>();
 
-        group.MapPut("/pause", SetAsync)
+        var set = group.MapPut("/pause", SetAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest);
+
+        if (requireOperate)
+        {
+            set.RequireAuthorization(CadenceTokenDefaults.OperatePolicy)
+                .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
+        }
     }
 
     private static async Task<JsonHttpResult<PauseResponse>> GetAsync(
