@@ -62,8 +62,7 @@ async function retype(text: string) {
 }
 
 describe('ScheduleForm', () => {
-  // Fails without the implementation: the component does not exist, so nothing ever loads a
-  // version, and nothing sends one back -- which the server answers with 409 rather than a write.
+  // Fails without the implementation: nothing loads a version, so nothing can send one back.
   it('sends back the version and the settings it loaded, and adopts the version it is answered with', async () => {
     const bodies: ScheduleWriteRequest[] = []
     let version = 7
@@ -88,13 +87,11 @@ describe('ScheduleForm', () => {
 
     expect(bodies).toHaveLength(1)
     expect(bodies[0].version).toBe(7)
-    // Both fields are always explicit: an absent version is refused with 409 and an absent
-    // settings object silently preserves, so neither absence can be allowed to happen by accident.
+    // Explicit because the two absences resolve oppositely: 409 for one, silent preserve for the other.
     expect(bodies[0].settings).toEqual({ region: 'eu' })
     expect(bodies[0].cronExpression).toBe('0 4 * * *')
 
-    // The second save is what proves the round trip: it has to carry the version the first save
-    // was answered with, not the one the initial load handed out.
+    // The round trip: the second save carries the version the first was answered with.
     await retype('0 5 * * *')
     await userEvent.click(screen.getByRole('button', { name: /^save/i }))
 
@@ -102,8 +99,7 @@ describe('ScheduleForm', () => {
     expect(bodies[1].version).toBe(8)
   })
 
-  // Fails without the implementation: nothing renders the conflict prose and nothing reloads, so
-  // the editor would keep offering the stale version and every retry would 409 again.
+  // Fails without the implementation: nothing reloads, so every retry would 409 on a spent version.
   it('renders the conflict prose and reloads the schedule underneath it', async () => {
     let gets = 0
 
@@ -140,8 +136,7 @@ describe('ScheduleForm', () => {
     expect(gets).toBe(2)
   })
 
-  // Fails without the implementation: nothing surfaces the 400's detail, so the field the server
-  // named -- and the reason it named it -- would never reach the operator.
+  // Fails without the implementation: the field the 400 names never reaches the operator.
   it("shows the server's prose for an invalid cron expression", async () => {
     server.use(
       http.get(ROUTE, () => HttpResponse.json(schedule())),
@@ -171,9 +166,8 @@ describe('ScheduleForm', () => {
     ).toBeInTheDocument()
   })
 
-  // Fails without the implementation: there is no read-only mode, so the form would offer a save
-  // against a route the container never mounted -- capabilities.scheduleWrite is false exactly
-  // when IWritableScheduleSource is absent, and then GET /schedule is not mapped either.
+  // scheduleWrite is false exactly when IWritableScheduleSource is absent, and then the schedule
+  // route's GET is not mapped either -- so the form must not call it.
   it('renders the declared schedule without loading one when writing is not a capability', async () => {
     let gets = 0
 

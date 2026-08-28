@@ -10,8 +10,7 @@ import type { SortingState } from '@tanstack/react-table'
 import { useState } from 'react'
 import type { JobSummaryResponse } from '../api/types'
 
-// Mirrors RunsTable's own map. Kept local for the same reason that one is: it is presentation for
-// this table, not part of the run-status domain that api/runStatus.ts holds.
+// Mirrors RunsTable's own map, and local for the same reason: presentation, not domain.
 const STATUS_COLORS: Record<string, string> = {
   Running: 'blue',
   Succeeded: 'green',
@@ -35,7 +34,6 @@ const columns = [
   columnHelper.accessor('cron', {
     header: 'Cron',
     enableSorting: false,
-    // A trigger-only job has no expression at all, which is not the same as an empty one.
     cell: (info) => info.getValue() ?? 'Trigger only',
   }),
   columnHelper.accessor('timeZone', {

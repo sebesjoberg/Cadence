@@ -14,8 +14,7 @@ export function Jobs() {
   const { data, error, isPending } = useQuery<JobSummaryResponse[], ProblemError>({
     queryKey: ['jobs'],
     queryFn: () => api.get<JobSummaryResponse[]>('/jobs'),
-    // A refused read is not a transient fault: retrying it only delays the message. Transient
-    // (5xx) failures still get the default client's one retry.
+    // A refused read is not a transient fault; 5xx still gets the client's one retry.
     retry: (failureCount, queryError) => queryError.status >= 500 && failureCount < 1,
   })
 

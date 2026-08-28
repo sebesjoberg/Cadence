@@ -28,8 +28,7 @@ function problem(status: number, type: string, title: string, detail: string) {
 }
 
 describe('TriggerButton', () => {
-  // Fails without the implementation: the component does not exist, so nothing posts the trigger
-  // and the run id the 202 carries is never shown.
+  // Fails without the implementation: nothing posts the trigger.
   it('shows the run id the server accepted', async () => {
     server.use(
       http.post(ROUTE, () =>
@@ -50,9 +49,8 @@ describe('TriggerButton', () => {
     expect(await screen.findByText(/8f1c0a2e-6f9a-4a1e-9d0e-2f6b9d4a1c33/)).toBeInTheDocument()
   })
 
-  // Fails without the implementation: nothing renders the detail, and a generic "failed to
-  // trigger" would destroy the only signal an operator gets that they are looking at a replica
-  // which serves the dashboard and registers no jobs (design plan 13.6).
+  // A generic "failed to trigger" would destroy the only signal that this replica serves the
+  // dashboard and registers no jobs (13.6).
   it("renders the server's registered-job count verbatim", async () => {
     server.use(
       http.post(ROUTE, () =>
@@ -75,8 +73,7 @@ describe('TriggerButton', () => {
     ).toBeInTheDocument()
   })
 
-  // Fails without the implementation: same reason, on the refusal an operator meets while the
-  // trigger switch is closed -- the prose says which switch, and a generic message would not.
+  // The prose says which switch is closed; a generic message would not.
   it('renders a paused refusal verbatim rather than a generic failure', async () => {
     server.use(
       http.post(ROUTE, () =>

@@ -53,21 +53,18 @@ describe('the job screens', () => {
     )
   })
 
-  // Fails without the implementation: the overview was a stub reading "Job list and schedule
-  // editing arrive with task 10", so none of these columns existed.
+  // Fails against the task 9 stub, which had none of these columns.
   it('lists every column the overview owes an operator', async () => {
     await renderRoute('/')
 
     expect(await screen.findByText('invoice-sync')).toBeInTheDocument()
     expect(screen.getByText('0 3 * * *')).toBeInTheDocument()
     expect(screen.getByText('Europe/Stockholm')).toBeInTheDocument()
-    // By cell rather than by text: 'Enabled' is also a column header, and the assertion is about
-    // the row.
+    // By cell, because 'Enabled' is also a column header.
     expect(screen.getByRole('cell', { name: 'Enabled' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: 'Failed' })).toBeInTheDocument()
 
-    // Rendered through the browser's locale, so the assertion is on the instant rather than on a
-    // format this test would otherwise be pinning by hand.
+    // On the instant rather than on a locale format this test would otherwise pin by hand.
     const next = new Date('2026-08-29T01:00:00Z').toLocaleString()
     const started = new Date('2026-08-28T01:00:00Z').toLocaleString()
 
@@ -75,10 +72,8 @@ describe('the job screens', () => {
     expect(screen.getByText(started)).toBeInTheDocument()
   })
 
-  // Fails without the implementation: the detail screen was a stub, so there was no form to be
-  // read-only and nothing that could have refrained from calling a route the container never
-  // mounted -- scheduleWrite is false exactly when IWritableScheduleSource is absent, and then
-  // GET /jobs/{name}/schedule is not mapped either.
+  // Fails against the task 9 stub. The route's GET is unmounted alongside the capability, so
+  // calling it would 404.
   it('reads the declared schedule off the job detail when writing is not a capability', async () => {
     let schedules = 0
 
@@ -103,8 +98,7 @@ describe('the job screens', () => {
       capabilities: { scheduleWrite: false, tokens: false },
     })
 
-    // The read-only note only exists once the route resolved and the form chose that branch, so
-    // waiting for it is what keeps this from passing before the router has matched anything.
+    // Only exists once the router matched and the form took that branch, so this cannot pass early.
     expect(await screen.findByText(/schedules are read-only here/i)).toBeInTheDocument()
 
     expect(screen.getByLabelText(/cron expression/i)).toBeDisabled()
@@ -112,8 +106,7 @@ describe('the job screens', () => {
     expect(schedules).toBe(0)
   })
 
-  // Fails without the implementation: same stub, from the other side -- nothing loaded a schedule
-  // and nothing offered to write one back.
+  // The same stub from the other side: nothing loaded a schedule, nothing offered to write one.
   it('loads the stored schedule where writing is a capability', async () => {
     server.use(
       http.get('/cadence/ui/jobs/invoice-sync/schedule', () =>

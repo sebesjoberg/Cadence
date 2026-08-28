@@ -67,8 +67,7 @@ export function JobDetail() {
 
         <TriggerButton
           jobName={name}
-          // The trigger's own run is not in the detail this screen already has, and its last-run
-          // column is a page-load old the moment the run starts.
+          // The run just started is not in the detail this screen is holding.
           onTriggered={() => queryClient.invalidateQueries({ queryKey: ['jobs'] })}
         />
       </Group>

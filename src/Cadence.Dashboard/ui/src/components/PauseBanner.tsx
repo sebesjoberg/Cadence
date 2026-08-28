@@ -8,13 +8,14 @@ import { pausesSchedule, pausesTriggers, scopeFrom } from '../api/pause'
 import type { ProblemError } from '../api/problem'
 import type { PauseRequest, PauseResponse } from '../api/types'
 
-// None is absent: the switches are reopened by the banner's own buttons, which know which of the
-// two to leave closed. Offering it here would be a second way to do that, and a worse one.
+// None is absent: the banner's own buttons reopen the switches, and know which one to leave closed.
 const CLOSABLE = [
   { value: 'Schedule', label: 'Scheduling only' },
   { value: 'Triggers', label: 'Manual triggers only' },
   { value: 'All', label: 'Everything' },
 ]
+
+const DEFAULT_SCOPE: PauseScopeName = 'Schedule'
 
 function setAt(state: PauseResponse | undefined): string {
   return state?.setAtUtc ? new Date(state.setAtUtc).toLocaleString() : 'an unrecorded time'
@@ -28,7 +29,7 @@ function setAt(state: PauseResponse | undefined): string {
 export function PauseBanner() {
   const queryClient = useQueryClient()
   const [opened, setOpened] = useState(false)
-  const [scope, setScope] = useState<PauseScopeName>('Schedule')
+  const [scope, setScope] = useState<PauseScopeName>(DEFAULT_SCOPE)
   const [reason, setReason] = useState('')
 
   const { data } = useQuery<PauseResponse, ProblemError>({
@@ -41,12 +42,18 @@ export function PauseBanner() {
     // can write is an audit field a caller can forge.
     mutationFn: (request) => api.put<void>('/pause', request),
     onSuccess: () => {
-      setOpened(false)
-      setReason('')
+      closeModal()
       queryClient.invalidateQueries({ queryKey: ['pause'] })
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
+
+  function closeModal() {
+    setOpened(false)
+    setScope(DEFAULT_SCOPE)
+    setReason('')
+    move.reset()
+  }
 
   const schedule = pausesSchedule(data?.scope ?? 'None')
   const triggers = pausesTriggers(data?.scope ?? 'None')
@@ -56,8 +63,7 @@ export function PauseBanner() {
   const resume = (next: PauseScopeName) =>
     move.mutate({ scope: next, reason: next === 'None' ? null : (data?.reason ?? null) })
 
-  // The Operate policy answers 403 with no body at all, so that case needs a line of its own
-  // rather than the generic one.
+  // The Operate policy answers 403 with no body at all, so that case needs a line of its own.
   const failure = move.error
     ? problemMessage(
         move.error,
@@ -66,6 +72,12 @@ export function PauseBanner() {
           : 'The pause switches could not be moved.',
       )
     : null
+
+  const refusal = failure && (
+    <Alert color="red" title="The pause switches were not moved">
+      {failure}
+    </Alert>
+  )
 
   return (
     <Stack gap="xs">
@@ -121,13 +133,11 @@ export function PauseBanner() {
         </Group>
       )}
 
-      {failure && (
-        <Alert color="red" title="The pause switches were not moved">
-          {failure}
-        </Alert>
-      )}
+      {/* A resume has no dialog to explain itself in; a refused pause renders inside the one the
+          operator is still looking at, rather than behind its overlay. */}
+      {!opened && refusal}
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title="Pause">
+      <Modal opened={opened} onClose={closeModal} title="Pause">
         <Stack gap="md">
           <NativeSelect
             label="What to pause"
@@ -144,8 +154,10 @@ export function PauseBanner() {
             onChange={(event) => setReason(event.currentTarget.value)}
           />
 
+          {refusal}
+
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setOpened(false)}>
+            <Button variant="default" onClick={closeModal}>
               Cancel
             </Button>
             <Button

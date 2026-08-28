@@ -54,8 +54,8 @@ function fromSchedule(schedule: ScheduleResponse): FormState {
   }
 }
 
-// What the job declares in code. Read off the job detail rather than the schedule route, because
-// the deployment that registered no writable source did not mount that route's GET either.
+// Read off the job detail rather than the schedule route: the deployment that registered no
+// writable source did not mount that route's GET either.
 function fromDetail(detail: JobDetailResponse): FormState {
   return {
     cronExpression: detail.job.cron ?? '',
@@ -98,9 +98,8 @@ function EditableSchedule({ jobName }: { jobName: string }) {
   const { data, error, refetch } = useQuery<ScheduleResponse, ProblemError>({
     queryKey: ['schedule', jobName],
     queryFn: () => api.get<ScheduleResponse>(path),
-    // A refused read is not a transient fault, and a refetch on window focus would replace what
-    // somebody is halfway through typing. This editor asks for fresh data explicitly instead.
     retry: (failureCount, queryError) => queryError.status >= 500 && failureCount < 1,
+    // A refetch on focus would replace what somebody is halfway through typing.
     refetchOnWindowFocus: false,
   })
 
@@ -112,8 +111,7 @@ function EditableSchedule({ jobName }: { jobName: string }) {
     try {
       const stored = await api.put<ScheduleResponse>(path, request)
 
-      // The stored row, not the one just sent: the version the next edit has to carry is the
-      // server's. Writing it into the cache is what re-seeds the editor below.
+      // The stored row, not the one just sent: the version the next edit carries is the server's.
       queryClient.setQueryData(['schedule', jobName], stored)
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       setSaved(stored.version)
@@ -126,8 +124,7 @@ function EditableSchedule({ jobName }: { jobName: string }) {
       })
 
       if (conflict) {
-        // The version the editor held is spent. Reloading is what the server's own prose asks
-        // for, and it leaves what is on screen equal to what is stored.
+        // The version the editor held is spent, and the server's own prose asks for a reload.
         await refetch()
       }
     } finally {
@@ -153,8 +150,7 @@ function EditableSchedule({ jobName }: { jobName: string }) {
 
   return (
     <Stack gap="sm">
-      {/* Keyed on the version, so every answer that moves it -- a save, or the reload a conflict
-          forces -- re-seeds the fields from what is actually stored. */}
+      {/* Keyed on the version, so any answer that moves it re-seeds the fields from storage. */}
       <ScheduleEditor
         key={data.version}
         initial={data}
@@ -195,9 +191,9 @@ function ScheduleEditor({ initial, busy, onSave, onReload }: ScheduleEditorProps
   const trimmed = state.maxDuration.trim()
 
   const submit = () => {
+    // Caught here only because an unparseable duration fails body binding, so the 400 that
+    // refuses it carries no document to quote.
     if (trimmed !== '' && !isTimeSpan(trimmed)) {
-      // Caught here only because an unparseable duration never reaches the handler that would
-      // have written prose about it -- the body fails to bind, and the 400 carries no document.
       setMalformed(true)
 
       return
@@ -212,10 +208,9 @@ function ScheduleEditor({ initial, busy, onSave, onReload }: ScheduleEditorProps
       overlap: state.overlap === '' ? null : state.overlap,
       maxDuration: trimmed === '' ? null : trimmed,
 
-      // Both explicit, always. Their absent-semantics resolve oppositely -- an absent version is
-      // refused with 409, an absent settings object silently preserves -- and neither rule is
-      // visible in a schema, so neither absence may be left to happen by accident. Both are
-      // values this editor is holding from the read.
+      // Both explicit, always: their absent-semantics resolve oppositely -- an absent version is
+      // refused with 409, an absent settings object silently preserves -- and neither is visible
+      // in a schema. Both are values this editor is holding from the read.
       settings: state.settings,
       version: state.version,
     })
