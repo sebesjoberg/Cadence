@@ -118,4 +118,20 @@ internal static partial class Log
                   "CadenceApiOptions.Oidc.ManageDataProtectionKeys to false leaves the key ring " +
                   "entirely to the host.")]
     public static partial void TicketKeyDecryptionNotCarried(this ILogger logger);
+
+    // 3200-3299: the operator tree's writes.
+
+    // v0.4 audits schedule edits to the log alone. An audit table was considered and parked: the
+    // line carries who and what, and a host that needs it retained already ships its logs somewhere.
+    [LoggerMessage(
+        EventId = 3210,
+        Level = LogLevel.Information,
+        Message = "Cadence's schedule for '{JobName}' was changed by {ChangedBy}: the cron " +
+                  "expression was '{OldCronExpression}' and is now '{NewCronExpression}'.")]
+    public static partial void ScheduleChanged(
+        this ILogger logger,
+        string jobName,
+        string changedBy,
+        string oldCronExpression,
+        string newCronExpression);
 }

@@ -142,3 +142,42 @@ public sealed record ApiTokenRequest(string? Name, string? Scope, DateTimeOffset
 /// <c>token</c>; a token's name is its audit identity rather than a person's.
 /// </summary>
 public sealed record AuthMeResponse(string Kind, string? Name, string? Subject, string? Scope);
+
+/// <summary>
+/// A schedule edit, carrying the version the editor loaded. Sent to the operator tree only: the
+/// machine-callable surface has no schedule write.
+/// </summary>
+/// <param name="CronExpression">Cron expression, 5- or 6-field.</param>
+/// <param name="TimeZoneId">IANA timezone id the expression is evaluated in.</param>
+/// <param name="Enabled">Whether the scheduler should act on this schedule.</param>
+/// <param name="Overlap">Overrides the job's declared overlap policy when set.</param>
+/// <param name="MaxDuration">Overrides the job's declared maximum duration when set.</param>
+/// <param name="Settings">Arbitrary per-job settings, replacing whatever is stored.</param>
+/// <param name="Version">The version the editor loaded, for optimistic concurrency.</param>
+public sealed record ScheduleWriteRequest(
+    string CronExpression,
+    string TimeZoneId,
+    bool Enabled,
+    string? Overlap,
+    TimeSpan? MaxDuration,
+    IReadOnlyDictionary<string, string>? Settings,
+    int Version);
+
+/// <summary>A stored schedule, as the editor reloads it.</summary>
+/// <param name="JobName">The job this configuration belongs to.</param>
+/// <param name="CronExpression">Cron expression, as stored.</param>
+/// <param name="TimeZoneId">The zone the expression is evaluated in, as the host resolved it.</param>
+/// <param name="Enabled">Whether the scheduler acts on this schedule.</param>
+/// <param name="Overlap">The overlap override, or null when the job's own declaration stands.</param>
+/// <param name="MaxDuration">The duration override, or null when the job's own declaration stands.</param>
+/// <param name="Settings">Arbitrary per-job settings.</param>
+/// <param name="Version">The version now stored, which the next edit has to send back.</param>
+public sealed record ScheduleResponse(
+    string JobName,
+    string CronExpression,
+    string TimeZoneId,
+    bool Enabled,
+    string? Overlap,
+    TimeSpan? MaxDuration,
+    IReadOnlyDictionary<string, string> Settings,
+    int Version);

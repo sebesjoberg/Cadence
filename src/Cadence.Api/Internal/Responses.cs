@@ -79,6 +79,18 @@ internal static class Responses
         Utc(token.ExpiresAtUtc),
         secret);
 
+    /// <summary>Projects a stored schedule, as the editor reloads it after a write.</summary>
+    /// <param name="schedule">The schedule, as the source read it back.</param>
+    public static ScheduleResponse ToSchedule(JobSchedule schedule) => new(
+        schedule.JobName,
+        schedule.CronExpression,
+        schedule.TimeZoneId,
+        schedule.Enabled,
+        schedule.Overlap?.ToString(),
+        schedule.MaxDuration,
+        schedule.Settings,
+        schedule.Version);
+
     /// <summary>Normalizes an optional instant to UTC, so a <c>...Utc</c> field is one.</summary>
     /// <param name="instant">The instant, or null.</param>
     public static DateTimeOffset? Utc(DateTimeOffset? instant) => instant?.ToUniversalTime();

@@ -1,4 +1,5 @@
 using Cadence.Execution;
+using Cadence.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,12 @@ internal static class ProblemMapper
         JobNotFoundException ex => JobNotFound(ex.JobName),
         TriggerNotAllowedException ex => Problem(400, "trigger-not-allowed", "Trigger not allowed", ex.Message),
         SchedulerPausedException ex => Problem(409, "scheduler-paused", "Triggers are paused", ex.Message),
+        ScheduleConflictException ex => Problem(
+            409,
+            "schedule-conflict",
+            "Schedule was modified",
+            $"The schedule for '{Echo(ex.JobName)}' moved since the editor loaded it. Reload it and " +
+            "reapply the change."),
         _ => null,
     };
 
@@ -121,6 +128,33 @@ internal static class ProblemMapper
         "Sign-in too old",
         "Creating an API token requires having authenticated with the identity provider within the " +
         $"last {maxAge}. Re-authenticate at {loginPath} and retry.");
+
+    /// <summary>Describes a cron expression the parser refused.</summary>
+    /// <param name="expression">The expression as the caller wrote it.</param>
+    public static ProblemDetails InvalidCron(string? expression) => Problem(
+        400,
+        "invalid-cron",
+        "Invalid cron expression",
+        $"cronExpression: '{Echo(expression)}' is not a cron expression. It needs 5 fields, or 6 " +
+        "to include seconds.");
+
+    /// <summary>Describes a timezone id this host resolves to nothing.</summary>
+    /// <param name="id">The id as the caller wrote it.</param>
+    public static ProblemDetails UnknownTimeZone(string? id) => Problem(
+        400,
+        "unknown-time-zone",
+        "Unknown timezone",
+        $"timeZoneId: '{Echo(id)}' is not a timezone on this host. Use an IANA id such as " +
+        "'Europe/Stockholm'. A container image with InvariantGlobalization enabled resolves none " +
+        "of them.");
+
+    /// <summary>Describes an overlap policy that names no defined member.</summary>
+    /// <param name="overlap">The policy as the caller wrote it.</param>
+    public static ProblemDetails InvalidOverlapPolicy(string? overlap) => Problem(
+        400,
+        "invalid-overlap-policy",
+        "Unknown overlap policy",
+        $"overlap: '{Echo(overlap)}' is not an overlap policy. Use Skip or AllowConcurrent.");
 
     /// <summary>Describes a token id that matches nothing revocable.</summary>
     /// <param name="id">The id that matched nothing.</param>

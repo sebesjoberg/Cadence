@@ -75,6 +75,15 @@ public static class CadenceUiRoutes
 
         MapTokenAdministration(group, services, api, options);
 
+        // Mounted on capability, the way /tokens is: no writable source means the route is absent
+        // and routing answers 404, rather than a handler that mounted and then apologised. No
+        // opt-in gate on top -- editing a schedule is what this tree exists for, and unlike
+        // credential administration it grants no reach beyond the jobs the tree already shows.
+        if (services.GetService<IWritableScheduleSource>() is not null)
+        {
+            ScheduleEndpoints.Map(group, requireOperate: cadencePolicies);
+        }
+
         AuthMapMarker.MapOnce(endpoints);
 
         return group;
