@@ -26,7 +26,7 @@
     The SPA bundle is a build output, not a checked-in artifact, so `dotnet build` has to produce
     it. Node is therefore a build requirement of this project alone.
 
-    Three targets rather than one, each incremental on its own inputs, so an unchanged rebuild
+    Four targets rather than one, each incremental on its own inputs, so an unchanged rebuild
     starts no external process at all: the Node probe shares the bundle's up-to-date check, which
     means a contributor with no Node can still rebuild a tree whose bundle is current.
   -->

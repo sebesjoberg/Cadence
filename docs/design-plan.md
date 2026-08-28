@@ -233,7 +233,8 @@ rather than left on the strength of looking fine twice.
 ## 9. Measured behaviour and deliberate deviations
 
 Recorded here because each was an assumption in the original spec that turned out to need
-correcting. All are pinned by tests in `Cadence.Core.Tests` or `Cadence.Storage.Sql.Tests`.
+correcting. All but §9.6, which is a measurement rather than a behaviour, are pinned by tests in
+`Cadence.Core.Tests` or `Cadence.Storage.Sql.Tests`.
 
 ### 9.1 Daylight saving, measured against Cronos 0.8.4 / Europe/Stockholm
 
@@ -307,6 +308,26 @@ constraint holds — a test asserts `Cadence.Core`'s assembly carries no referen
 `Microsoft.AspNetCore.*`, even transitively — but the cost is real and worth naming: every Core
 consumer now gets `DefaultHealthCheckService` and the health-check publisher hosted service, the
 latter inert with no publisher registered. Recorded so nobody rediscovers it as a violation.
+
+### 9.6 What the dashboard bundle weighs
+
+Spec §10 risk 5 wanted the number recorded so a later regression is visible. The figure taken at
+first build — 194.5 kB raw, 60.8 kB gzipped — was React over a placeholder route, measured before
+Mantine, the three TanStack packages and the screens themselves landed. What v0.4 actually ships,
+from `src/Cadence.Dashboard/wwwroot/assets` after a Release build:
+
+| File | Raw | Gzipped |
+|---|---|---|
+| `index-*.js` | 601.4 kB | 185.2 kB |
+| `index-*.css` | 202.3 kB | 29.4 kB |
+| **Total** | **803.6 kB** | **214.6 kB** |
+
+Gzipped with `gzip` at its default level, which is the comparison Vite's own build report makes.
+That is 3.5× the gzipped figure first recorded, and the reason it is replaced here rather than
+annotated in a commit message: a baseline that far out measures nothing, and this is the number the
+next change has to be compared against. Cadence compresses nothing itself — the assets are embedded
+in the assembly and streamed by an endpoint — so what a browser receives is whatever the host has
+configured.
 
 ---
 
@@ -810,13 +831,15 @@ documenting before someone deploys it:
 
 So the supported shape is every replica mapping the API. `MapCadenceApi()` does **not** throw on an
 empty registry — registering jobs behind a feature flag is legitimate, and a hard failure would
-break it. Instead it warns at map time, and the trigger endpoint's 404 names the cause: *no job
-named 'x' is registered in this instance (0 jobs registered)*. A misconfigured pod then diagnoses
-itself from one response body.
+break it. Instead it warns at map time, and the trigger endpoint's 404 names the cause: *No job is
+registered under the name 'x'. This replica has 0 registered job(s); a replica that hosts only the
+dashboard has none.* The job-detail read and the schedule pair answer with the same count, from the
+same `ProblemMapper.JobNotFound`, so a misconfigured pod diagnoses itself from whichever response
+body reaches the operator first.
 
 ### 13.7 What the dashboard settled
 
-v0.4 is `AddDashboard()`, `MapCadenceDashboard()` and the React SPA the package embeds. Four
+v0.4 is `AddDashboard()`, `MapCadenceDashboard()` and the React SPA the package embeds. Five
 decisions are worth recording here rather than leaving them to be re-derived from the code.
 
 **Paths stopped being configurable.** §13.1 already states the consequence — `CadenceApiOptions` has
@@ -856,14 +879,25 @@ accident, existing solely so `Cadence.Dashboard` — a separate assembly — can
 supported API, and the type's own doc comment says so; the honesty of that label is what the whole
 trade rests on.
 
-**The schedule write is still a person's, not a scope's.** §13.2 drew this line for the machine tree
-— a token can start work and stop it, only a person changes when work happens — and the dashboard
-does not reopen it. `ScheduleEndpoints` requires a *user principal*, the same check `TokenEndpoints`
+**The schedule write, and the Manual trigger, are a person's and not a scope's.** §13.2 drew that
+line for the machine tree — a token can start work and stop it, only a person changes when work
+happens — and the dashboard does not reopen it. `ScheduleEndpoints` requires a *user principal*, the same check `TokenEndpoints`
 already made for credential administration, not `Operate`: an `Operate`-scoped token can already
 trigger and pause, and widening that same scope to cover schedule writes would hand a machine
 credential the trust this line reserves for a person, rather than adding a fourth thing the scope
 means. Scopes describe what a machine may do; this is a decision about who may do it, and the two
-are orthogonal on purpose.
+are orthogonal on purpose. The operator tree's trigger takes the same check, one remove out: it is
+the route that records `TriggerKind.Manual`, and a history that cannot separate someone clicking
+from something calling us is the whole reason that second route exists. A token loses nothing by
+it — `/cadence/api/jobs/{name}/trigger` is still open to `Operate` and records `Api`, which is the
+true answer for a machine.
+
+One exception, and it is the one §13.5 already states for token administration: a host-named policy
+governs alone. Under it Cadence adds no check of its own, so whatever that policy admits may rewrite
+a schedule and may record a `Manual` run — `CadenceUiRoutes` derives both from `PolicyName is null`,
+so the two cannot drift apart. A deployment that wants the person/machine line drawn inside a policy
+of its own has to draw it there; the alternative is Cadence overruling a policy the host named, which
+§13.3's table settles against everywhere else.
 
 **Schedule edits are audited to the log, and only the log.** `ScheduleEndpoints.PutAsync` writes
 event `3007` — job name, changed-by, old cron, new cron — and nothing more durable. That is enough

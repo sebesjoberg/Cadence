@@ -294,7 +294,14 @@ prefix into. `CadenceDashboardOptions.Title` is what tells two open tabs apart.
 
 The dashboard shows job and run history, lets an operator pause the cluster, mint and revoke API
 tokens, trigger a job by hand — recorded as `Manual`, distinct from a token's `Api` — and edit a
-job's cron, timezone, enabled flag, overlap policy and maximum duration. Two things it does not do:
+job's cron, timezone, enabled flag, overlap policy and maximum duration.
+
+Editing a schedule and triggering by hand both require a signed-in user principal, not the `operate`
+scope a token can hold: only a person changes when work happens, and `Manual` in the history has to
+mean a person clicked — a token still has `POST /cadence/api/jobs/{name}/trigger`, which records
+`Api`. The exception is the one token administration has: a policy you named with
+`RequireAuthorization` governs alone, and under it whatever that policy admits may do both. Two
+things the dashboard does not do:
 
 - **A job's `Settings` are displayed and round-tripped verbatim, never edited.** The form shows
   them and carries them through unchanged on every save; writing them needs the store directly.

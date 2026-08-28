@@ -46,7 +46,7 @@ internal static class JobEndpoints
     /// <param name="group">The group the tree mounts under.</param>
     /// <param name="requireOperate">Whether the route requires Cadence's Operate policy.</param>
     public static void MapTrigger(IEndpointRouteBuilder group, bool requireOperate)
-        => DeclareTrigger(group.MapPost(TriggerRoute, TriggerAsync), requireOperate);
+        => DeclareTrigger(group.MapPost(TriggerRoute, TriggerAsync), requireOperate, requireUserPrincipal: false);
 
     /// <summary>
     /// Declares a trigger route's statuses and its policy, whichever tree mapped it. Shared with
@@ -54,7 +54,12 @@ internal static class JobEndpoints
     /// </summary>
     /// <param name="trigger">The mapped route.</param>
     /// <param name="requireOperate">Whether the route requires Cadence's Operate policy.</param>
-    internal static void DeclareTrigger(RouteHandlerBuilder trigger, bool requireOperate)
+    /// <param name="requireUserPrincipal">
+    /// Whether the route requires a user principal. Always false on this tree, which is the one a
+    /// machine calls and which records <see cref="TriggerKind.Api"/> for it.
+    /// </param>
+    internal static void DeclareTrigger(
+        RouteHandlerBuilder trigger, bool requireOperate, bool requireUserPrincipal)
     {
         trigger.Produces<TriggerResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -63,8 +68,18 @@ internal static class JobEndpoints
 
         if (requireOperate)
         {
-            trigger.RequireAuthorization(CadenceTokenDefaults.OperatePolicy)
-                .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
+            trigger.RequireAuthorization(CadenceTokenDefaults.OperatePolicy);
+        }
+
+        if (requireUserPrincipal)
+        {
+            trigger.AddEndpointFilter<UserPrincipalFilter>();
+        }
+
+        // Declared once however many of the two are on, so the document carries no duplicate row.
+        if (requireOperate || requireUserPrincipal)
+        {
+            trigger.WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
         }
     }
 
@@ -76,12 +91,18 @@ internal static class JobEndpoints
     /// <param name="name">The job to start.</param>
     /// <param name="kind">What the run is recorded as having been started by.</param>
     /// <param name="trigger">Dispatches the run.</param>
+    /// <param name="registry">
+    /// Counts what this replica registered, for the 404's detail. §13.6: the trigger runs in the
+    /// process that received the request, so a dashboard-only replica 404s every name, and the
+    /// count is what says so from the response body.
+    /// </param>
     /// <param name="cadence">Supplies this instance's id, for the response.</param>
     /// <param name="cancellationToken">Cancels the dispatch.</param>
     internal static async Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> DispatchAsync(
         string name,
         TriggerKind kind,
         IJobTrigger trigger,
+        IJobRegistry registry,
         IOptions<CadenceOptions> cadence,
         CancellationToken cancellationToken)
     {
@@ -93,7 +114,7 @@ internal static class JobEndpoints
             // "start the job as configured" to "start the job with arbitrary input".
             result = await trigger.TriggerAsync(name, kind, payload: null, cancellationToken);
         }
-        catch (Exception ex) when (ProblemMapper.Describe(ex) is { } problem)
+        catch (Exception ex) when (ProblemMapper.Describe(ex, registry.All.Count) is { } problem)
         {
             // Filtered rather than caught wholesale: an exception the mapper does not recognise
             // propagates as a 500 instead of being flattened into a misleading problem document.
@@ -111,9 +132,10 @@ internal static class JobEndpoints
     private static Task<Results<JsonHttpResult<TriggerResponse>, JsonHttpResult<ProblemDetails>>> TriggerAsync(
         string name,
         IJobTrigger trigger,
+        IJobRegistry registry,
         IOptions<CadenceOptions> cadence,
         CancellationToken cancellationToken)
-        => DispatchAsync(name, TriggerKind.Api, trigger, cadence, cancellationToken);
+        => DispatchAsync(name, TriggerKind.Api, trigger, registry, cadence, cancellationToken);
 
     // Resolving every schedule per request is deliberate: this is a dashboard read, not the tick
     // loop, and resolving means the answer matches what the ticker would do right now.
@@ -151,7 +173,7 @@ internal static class JobEndpoints
     {
         if (!registry.TryGet(name, out var descriptor) || descriptor is null)
         {
-            return ProblemMapper.AsResult(ProblemMapper.JobNotFound(name));
+            return ProblemMapper.AsResult(ProblemMapper.JobNotFound(name, registry.All.Count));
         }
 
         var resolution = await resolver.ResolveAsync(cancellationToken);

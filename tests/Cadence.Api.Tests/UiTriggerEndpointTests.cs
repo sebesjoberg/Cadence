@@ -21,27 +21,27 @@ public sealed class UiTriggerEndpointTests
 {
     private const string Token = "s3cret-token-value-32-chars-long";
 
+    /// <summary>The signed-in person every call on the operator tree here is made by.</summary>
+    private const string Operator = "Ada Lovelace";
+
     private const string MachinePath =
         CadenceApiDefaults.ApiPath + "/jobs/" + ApiTestJobs.OnDemandName + "/trigger";
 
     private const string UiPath =
         CadenceApiDefaults.UiPath + "/jobs/" + ApiTestJobs.OnDemandName + "/trigger";
 
-    private static readonly CadenceUiMapOptions Open =
-        new() { CookiePolicy = false, LoopbackOnly = false };
-
     private static readonly CadenceUiMapOptions Cookie =
         new() { CookiePolicy = true, LoopbackOnly = false };
 
     // The distinction the second route exists for, asserted where it is observable: on the runs the
-    // two calls recorded, for one job, in one host.
+    // two calls recorded, for one job, in one host. A person on the operator tree and a token on the
+    // machine one, which is the split the kinds are named for.
     [Fact]
     public async Task TheOperatorTreeRecordsManualAndTheMachineTreeRecordsApi()
     {
         await using var host = await StartAsync();
-        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token);
 
-        var machine = await host.Client.PostAsync(MachinePath, content: null);
+        var machine = await host.Client.SendAsync(WithToken(MachinePath));
         var dashboard = await host.Client.PostAsync(UiPath, content: null);
 
         Assert.Equal(HttpStatusCode.Accepted, machine.StatusCode);
@@ -64,6 +64,8 @@ public sealed class UiTriggerEndpointTests
         var response = await host.Client.PostAsync(UiPath, content: null);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal(TriggerKind.Manual, trigger.LastTrigger);
+
         var body = await response.Content.ReadFromJsonAsync<TriggerResponse>();
         Assert.NotNull(body);
         Assert.Equal(runId, body.RunId);
@@ -93,7 +95,6 @@ public sealed class UiTriggerEndpointTests
     {
         var trigger = new FakeTrigger { Throws = new JobNotFoundException(ApiTestJobs.OnDemandName) };
         await using var host = await StartAsync(trigger);
-        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token);
 
         var response = await host.Client.PostAsync(path, content: null);
 
@@ -107,7 +108,6 @@ public sealed class UiTriggerEndpointTests
     {
         var trigger = new FakeTrigger { Result = DispatchResult.Skipped("already running here") };
         await using var host = await StartAsync(trigger);
-        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token);
 
         var response = await host.Client.PostAsync(path, content: null);
 
@@ -115,33 +115,34 @@ public sealed class UiTriggerEndpointTests
         Assert.Contains("already running here", await response.Content.ReadAsStringAsync());
     }
 
-    // The cookie tree's writes carry Operate, the same pair pausing does.
+    // The reason the two routes are not interchangeable. Operate is a scope a token holds, so
+    // without a user-principal check on this route a CI job could record itself as Manual -- and
+    // then history no longer separates someone clicking from something calling us. The token is not
+    // shut out of anything: the machine route takes it, and records what it actually is.
     [Fact]
-    public async Task ASignedInUserTriggersFromTheOperatorTree()
+    public async Task ATokenIsRefusedOnTheOperatorTreeAndStillTriggersOnTheMachineOne()
     {
         var trigger = new FakeTrigger();
+        await using var host = await StartAnonymousAsync(trigger);
 
-        await using var host = await ApiTestHost.StartWithOidcAsync(
-            services: collection => collection.Replace(ServiceDescriptor.Singleton<IJobTrigger>(trigger)),
-            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
+        host.Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token);
 
-        await host.SignInAsync("u1", "Ada");
-        host.Client.DefaultRequestHeaders.Add(CadenceApiDefaults.SessionHeader, "1");
+        var dashboard = await host.Client.PostAsync(UiPath, content: null);
 
-        var response = await host.Client.PostAsync(UiPath, content: null);
+        Assert.Equal(HttpStatusCode.Forbidden, dashboard.StatusCode);
+        Assert.Null(trigger.LastTrigger);
 
-        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        Assert.Equal(TriggerKind.Manual, trigger.LastTrigger);
+        var machine = await host.Client.PostAsync(MachinePath, content: null);
+
+        Assert.Equal(HttpStatusCode.Accepted, machine.StatusCode);
+        Assert.Equal(TriggerKind.Api, trigger.LastTrigger);
     }
 
     [Fact]
     public async Task AnUnauthenticatedCallerIsRefusedOnTheCookieTree()
     {
         var trigger = new FakeTrigger();
-
-        await using var host = await ApiTestHost.StartWithOidcAsync(
-            services: collection => collection.Replace(ServiceDescriptor.Singleton<IJobTrigger>(trigger)),
-            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
+        await using var host = await StartAnonymousAsync(trigger);
 
         var response = await host.Client.PostAsync(UiPath, content: null);
 
@@ -149,18 +150,40 @@ public sealed class UiTriggerEndpointTests
         Assert.Null(trigger.LastTrigger);
     }
 
+    /// <summary>The dashboard's own shape: a signed-in person on the cookie tree.</summary>
+    private static async Task<ApiTestHost> StartAsync(FakeTrigger? trigger = null)
+    {
+        var host = await StartAnonymousAsync(trigger);
+
+        await host.SignInAsync("u1", Operator);
+        host.Client.DefaultRequestHeaders.Add(CadenceApiDefaults.SessionHeader, "1");
+
+        return host;
+    }
+
     // Replace, not Add: AddCadence registers IJobTrigger with TryAddSingleton and this hook runs
     // after it, so adding a second registration would leave which one resolves to ordering.
-    private static Task<ApiTestHost> StartAsync(FakeTrigger? trigger = null) => ApiTestHost.StartAsync(
-        api => api.Tokens.Add(Token),
-        services =>
-        {
-            if (trigger is not null)
+    private static Task<ApiTestHost> StartAnonymousAsync(FakeTrigger? trigger = null)
+        => ApiTestHost.StartWithOidcAsync(
+            configure: api => api.Tokens.Add(Token),
+            services: collection =>
             {
-                services.Replace(ServiceDescriptor.Singleton<IJobTrigger>(trigger));
-            }
-        },
-        endpoints: routes => CadenceUiRoutes.Map(routes, Open));
+                if (trigger is not null)
+                {
+                    collection.Replace(ServiceDescriptor.Singleton<IJobTrigger>(trigger));
+                }
+            },
+            endpoints: routes => CadenceUiRoutes.Map(routes, Cookie));
+
+    // The machine tree as a machine reaches it. Sent as a request of its own so the ticket the
+    // client carries for the operator tree is not what authenticates this call.
+    private static HttpRequestMessage WithToken(string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+
+        return request;
+    }
 
     private sealed class FakeTrigger : IJobTrigger
     {

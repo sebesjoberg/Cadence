@@ -97,7 +97,11 @@ internal static class DashboardShell
         endpoints.MapGet(CadenceApiDefaults.BasePath, Serve).AllowAnonymous();
         endpoints.MapGet($"{CadenceApiDefaults.BasePath}/{{**path}}", Serve).AllowAnonymous();
 
-        // Literal segments outrank a catch-all, so the mapped trees win over these.
+        // Literal segments outrank a catch-all, so the mapped trees win over these. An anonymous
+        // caller therefore reads the route set off the difference -- 404 here, 401 from a mapped
+        // route -- which is accepted rather than hidden: every path is a compile-time constant of
+        // the package, and the shell above already hands the same caller this deployment's
+        // capability flags.
         endpoints.MapGet($"{CadenceApiDefaults.ApiPath}/{{**path}}", () => Results.NotFound());
         endpoints.MapGet($"{CadenceApiDefaults.UiPath}/{{**path}}", () => Results.NotFound());
     }

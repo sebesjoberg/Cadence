@@ -37,11 +37,20 @@ public sealed class ScheduleEndpointTests
     /// <summary>The signed-in person every write here is made by, and the name the audit records.</summary>
     private const string Operator = "Ada Lovelace";
 
+    /// <summary>Stands in for a policy the host owns, as an app with its own gate would write one.</summary>
+    private const string HostPolicy = "cadence-ops";
+
+    /// <summary>A machine credential, which is what the host policy below admits.</summary>
+    private const string Token = "s3cret-token-value-32-chars-long";
+
     private static readonly CadenceUiMapOptions Open =
         new() { CookiePolicy = false, LoopbackOnly = false };
 
     private static readonly CadenceUiMapOptions Cookie =
         new() { CookiePolicy = true, LoopbackOnly = false };
+
+    private static readonly CadenceUiMapOptions UnderHostPolicy =
+        new() { CookiePolicy = false, LoopbackOnly = false, PolicyName = HostPolicy };
 
     [Fact]
     public async Task WritesTheScheduleAndReturnsItsNewVersion()
@@ -381,6 +390,43 @@ public sealed class ScheduleEndpointTests
         // The read is gated with the write: a version is only useful to whoever may spend it.
         Assert.Equal(HttpStatusCode.Forbidden, read.StatusCode);
         Assert.Null(source.Last);
+    }
+
+    // The one exception to the rule above, and §13.7 states it: a host-named policy governs alone,
+    // so Cadence adds no user-principal check and whatever that policy admits -- here a bearer
+    // token, which is not a person -- may rewrite the schedule. The same trade token administration
+    // makes, and the branch that turns the milestone's defining check off, so it is tested.
+    [Fact]
+    public async Task AHostNamedPolicyGovernsTheScheduleWriteAlone()
+    {
+        var source = new FakeWritableScheduleSource();
+
+        await using var host = await ApiTestHost.StartAsync(
+            configure: api =>
+            {
+                api.Tokens.Add(Token);
+                api.RequireAuthorization(HostPolicy);
+            },
+            services: collection =>
+            {
+                Register(collection, source);
+                collection.AddAuthorizationBuilder().AddPolicy(
+                    HostPolicy,
+                    policy => policy
+                        .AddAuthenticationSchemes(CadenceApiDefaults.AuthenticationScheme)
+                        .RequireAuthenticatedUser());
+            },
+            endpoints: routes => CadenceUiRoutes.Map(routes, UnderHostPolicy));
+
+        host.Client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Token);
+
+        var write = await host.Client.PutAsJsonAsync(SchedulePath, Edit(NewCron));
+        var read = await host.Client.GetAsync(SchedulePath);
+
+        Assert.Equal(HttpStatusCode.OK, write.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(NewCron, source.Last!.CronExpression);
     }
 
     [Fact]

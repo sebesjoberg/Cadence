@@ -21,9 +21,13 @@ internal static class ProblemMapper
 
     /// <summary>Describes a refusal that arrived as an exception, or null when it is not one of ours.</summary>
     /// <param name="exception">The exception to describe.</param>
-    public static ProblemDetails? Describe(Exception exception) => exception switch
+    /// <param name="registered">
+    /// How many jobs this replica has, where the caller knows it. The trigger does, and its 404 is
+    /// the one §13.6 wants the count on.
+    /// </param>
+    public static ProblemDetails? Describe(Exception exception, int? registered = null) => exception switch
     {
-        JobNotFoundException ex => JobNotFound(ex.JobName),
+        JobNotFoundException ex => JobNotFound(ex.JobName, registered),
         TriggerNotAllowedException ex => Problem(400, "trigger-not-allowed", "Trigger not allowed", ex.Message),
         SchedulerPausedException ex => Problem(409, "scheduler-paused", "Triggers are paused", ex.Message),
         ScheduleConflictException ex => ScheduleConflict(ex.JobName),

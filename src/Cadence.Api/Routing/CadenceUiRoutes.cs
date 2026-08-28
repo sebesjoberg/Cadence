@@ -35,6 +35,10 @@ public static class CadenceUiRoutes
         // the two trees cannot disagree about what a named policy means.
         var cadencePolicies = options.PolicyName is null && options.CookiePolicy;
 
+        // The condition the two writes §13.2 reserves to a person share -- the schedule edit, and
+        // the trigger that records Manual. A host-named policy governs those alone as well.
+        var userPrincipal = options.PolicyName is null;
+
         // §4.5's CSRF rule, on the tree a ticket exists to reach.
         if (options.CookiePolicy)
         {
@@ -69,8 +73,10 @@ public static class CadenceUiRoutes
         // The reads are the same handlers the machine tree maps: two trees, one implementation. The
         // trigger is a route of this tree's own, because it records TriggerKind.Manual where the
         // machine tree records Api -- but it shares that route's dispatch, so only the kind differs.
+        // Manual has to mean a person clicked, so the route takes the user-principal check as well:
+        // Operate is a scope a token holds, and a token still has /cadence/api, which records Api.
         JobEndpoints.MapReads(group);
-        UiTriggerEndpoints.Map(group, requireOperate: cadencePolicies);
+        UiTriggerEndpoints.Map(group, requireOperate: cadencePolicies, requireUserPrincipal: userPrincipal);
         RunEndpoints.Map(group);
         PauseEndpoints.Map(group, requireOperate: cadencePolicies);
         InstanceEndpoints.Map(group);
@@ -86,7 +92,7 @@ public static class CadenceUiRoutes
         // grants no reach beyond the jobs the tree already shows.
         if (services.GetService<IWritableScheduleSource>() is not null)
         {
-            ScheduleEndpoints.Map(group, requireUserPrincipal: options.PolicyName is null);
+            ScheduleEndpoints.Map(group, requireUserPrincipal: userPrincipal);
         }
 
         AuthMapMarker.MapOnce(endpoints);
