@@ -168,9 +168,8 @@ Distributed pause and one-`MapCadence()`-or-two are settled and owned elsewhere:
 
 The gaps still open are tracked as debt in [`plan-to-1.0.md`](plan-to-1.0.md) — *Debt to clear before
 1.0*: **#2** (a 1s tick that re-evaluates every job does not scale; needs an in-memory min-heap of
-next occurrences, rebuilt when the change token fires), **#3** (boot must not fail on a schedule-store
-blip — the degraded-health half shipped in §13.4, the boot-fallback half did not) and **#7** (warn at
-boot if alerting is enabled without a persistent store).
+next occurrences, rebuilt when the change token fires) and **#7** (warn at boot if alerting is enabled
+without a persistent store).
 
 Numbered as first written, so the references from §13 still resolve. **Closed since:** **#1** (`Skip`
 across instances — a run of a `Skip` job holds its job name as an exclusive key on the run row, so a
@@ -179,12 +178,33 @@ reap, which is why the README documents a bounded block rather than a best-effor
 ids need ICU — `CronParser` detects it and names `InvariantGlobalization`), **#5**
 (`IWritableScheduleSource` split out), **#6** (`JobContext.Report` batching — flush on 100 entries or
 250 ms, drop rather than block, because back-pressure on `Report` would make a slow database into a
-slow job), **#8** (`dotnet pack`'s `GenerateEmbeddedFilesManifest` warning — `CadenceEmbedSpa` hung off
+slow job), **#3** (see below), **#8** (`dotnet pack`'s `GenerateEmbeddedFilesManifest` warning — `CadenceEmbedSpa` hung off
 `BeforeBuild` only, and pack's output-group pass reaches `PrepareResourceNames` without going through
 it, so the item list was empty in that pass alone; the warning carries no code and could not be
 suppressed, so the target now also hooks the manifest-inputs target that raises it).
 
+**Gap 3 was mis-stated, and the wrong half was the documented one.** It read "boot versus tick: never
+fail boot on a store blip", and boot was never the problem — `StartAsync` reads no schedules, the
+change-token registration's poll is fire-and-forget behind a catch-all, and the first read happens on
+the tick, where an exception was already caught. The real defect was one exception filter.
+`ScheduleTicker.ReloadSchedulesAsync` caught a failed read only `when (_states.Count > 0)` —
+deliberately, to keep running on the schedules already loaded — so a blip *after* loading was
+survivable and a blip *before* it was not. On a cold start against an unreachable store the exception
+escaped to the hosted service's catch-all, the tick was abandoned, and **nothing ran at all** for as
+long as the store stayed down, including jobs whose code-declared cron needed no store row to be
+correct.
+
+Closed by resolving from the code defaults on that branch rather than giving up:
+`ScheduleResolver.ResolveFromDefaults()` runs the same per-job loop with no rows, so a job with no
+default cron is reported as a problem exactly as it would be if the store were readable and held
+nothing for it. The fallback is a stopgap, not a latch — the store is retried on the next reload and
+the first success replaces it silently. Event `1106` says the process is running on code-declared cron
+and that store or dashboard edits are not in effect; storage health already reported `Degraded`
+(§13.4), so the operator signal was never the missing part. Three tests pin it, and all three fail
+without the fix.
+
 ---
+
 ## 9. Measured behaviour and deliberate deviations
 
 Each was an assumption in the original spec that turned out to need correcting. All but §9.6, which

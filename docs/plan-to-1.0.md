@@ -472,7 +472,8 @@ the sprawl v0.5 exists to remove.
 | | Item | Size | Why it gates 1.0 |
 |---|---|---|---|
 | Gap 2 | Tick re-evaluates every job every second; needs the min-heap of next occurrences, rebuilt on the change token | medium | Scales with job count. Do it **between v0.5 and v0.6** so the enqueue path is settled first and the alerting sweep is built on it |
-| Gap 3 | Boot fails on a schedule-store blip. Start from code defaults, report degraded, alert | small | A database hiccup must not stop the application starting. The degraded-health half shipped in §13.4; the boot half did not |
+| New | `IScheduleSource.GetChangeToken()` is called during `StartAsync`, and a throw there still fails boot | trivial | Found while closing gap 3. Both shipped sources are non-throwing by design, so this only bites a custom source — but the boot path should not depend on that being true |
+| ~~Gap 3~~ | ~~Boot fails on a schedule-store blip~~ | — | **Done, and the gap was mis-stated.** Boot never read the store; the defect was `ReloadSchedulesAsync` catching a failed read only `when (_states.Count > 0)`, so a cold start against a dead store scheduled *nothing* rather than falling back to the code-declared cron. See §8 |
 | ~~Gap 8~~ | ~~`dotnet pack` logs a `GenerateEmbeddedFilesManifest` warning~~ | — | **Done.** `CadenceEmbedSpa` hung off `BeforeBuild` only, which pack's output-group pass never reaches. It now also hooks the manifest-inputs target. Clean-tree pack verified to still embed the bundle |
 | ~~—~~ | ~~Storage degraded-health tests have never run against a live store~~ | — | **Done.** They run, and pass, on both tiers. CI now fails when a tier skips its way past a real server instead of reporting a green tick over three tests |
 | ~~—~~ | ~~`CadenceUiRoutes.cs:15` claims the repo uses no `InternalsVisibleTo`~~ | — | **Done.** Reworded to what is true: the three entries grant a project access to its own test project, not to another shipped assembly |
@@ -514,8 +515,8 @@ at real published versions.
 1. **Name decision.** No code. Blocks publishing and gets more expensive weekly. **Still open — yours.**
 2. ~~The trivial debt~~ — **done.**
 3. ~~Gap 8~~ — **done**, and it was a real defect rather than a logging artifact.
-4. **Gap 3**, the boot fallback. Small, and a correctness hole rather than polish. **Next.**
-5. **v0.5 — queue the claim, pull the work.** The breaking semantics land here, pre-1.0.
+4. ~~Gap 3~~ — **done**, and it was a worse bug than the gap described.
+5. **v0.5 — queue the claim, pull the work.** The breaking semantics land here, pre-1.0. **Next.**
 6. **Gap 2**, the min-heap, on the settled enqueue path.
 7. **v0.6 — alerting.** The watchdog is a queue item, not a sixth coordination design.
 8. **v0.7 — tooling.** The analyzer first: its promise is already in the README.

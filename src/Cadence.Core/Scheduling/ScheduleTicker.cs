@@ -232,6 +232,20 @@ public sealed class ScheduleTicker
             _logger.ScheduleReloadFailed(ex, _states.Count);
             return;
         }
+        catch (Exception ex)
+        {
+            // Nothing loaded yet, so there is no previous schedule to keep: this is the cold start
+            // with the store unreachable. Fall back to the cron declared in code rather than
+            // scheduling nothing at all -- returning here would abandon every job, including the
+            // ones whose code default needs no store row to be correct, and it would keep doing so
+            // for as long as the store stayed down.
+            //
+            // Storage health already reports Degraded from the storage packages themselves, so the
+            // operator-visible signal is in place; what was missing was carrying on. The store is
+            // retried on the next reload, and the first successful one replaces these silently.
+            resolution = _resolver.ResolveFromDefaults();
+            _logger.ScheduleStoreUnavailableAtStart(ex, resolution.Schedules.Count);
+        }
 
         foreach (var problem in resolution.Problems)
         {

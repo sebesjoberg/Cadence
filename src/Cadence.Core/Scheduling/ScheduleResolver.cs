@@ -33,8 +33,25 @@ public sealed class ScheduleResolver
     public async Task<ScheduleResolution> ResolveAsync(CancellationToken cancellationToken)
     {
         var stored = await _source.GetAllAsync(cancellationToken).ConfigureAwait(false);
-        var rows = stored.ToDictionary(s => s.JobName, StringComparer.Ordinal);
 
+        return Resolve(stored.ToDictionary(s => s.JobName, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Produces the effective schedule for every scheduled job from the code-declared defaults
+    /// alone, without reading the store.
+    /// </summary>
+    /// <remarks>
+    /// For the cold start where the store cannot be reached at all. A job that declared no default
+    /// cron becomes a reported problem here, exactly as it would if the store were readable and held
+    /// no row for it, so the degraded pass is honest about what it cannot schedule rather than
+    /// silently omitting it.
+    /// </remarks>
+    public ScheduleResolution ResolveFromDefaults() =>
+        Resolve(new Dictionary<string, JobSchedule>(StringComparer.Ordinal));
+
+    private ScheduleResolution Resolve(Dictionary<string, JobSchedule> rows)
+    {
         var schedules = new Dictionary<string, EffectiveSchedule>(StringComparer.Ordinal);
         var problems = new List<ScheduleProblem>();
 

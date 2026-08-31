@@ -19,6 +19,9 @@ public class SchedulingTests
 {
     private const string Hourly = "0 * * * *";
 
+    /// <summary>Due once a year, so it is never due inside a test's window.</summary>
+    private const string NewYear = "0 0 1 1 *";
+
     [Fact]
     public async Task NothingRunsBeforeAnOccurrenceIsDue()
     {
@@ -43,6 +46,46 @@ public class SchedulingTests
         Assert.Equal(RunStatus.Succeeded, run.Status);
         Assert.Equal(TriggerKind.Schedule, run.Trigger);
         Assert.Equal(Occurrences.Utc(2026, 8, 24, 11, 0), run.ScheduledFor);
+    }
+
+    /// <summary>
+    /// Gap 3: a store blip must never stop scheduling, including on the very first reload. The
+    /// guard that kept the previously loaded schedules only fired once something had been loaded,
+    /// so a cold start against an unreachable store scheduled nothing at all -- and kept doing so
+    /// for as long as the store stayed down.
+    /// </summary>
+    [Fact]
+    public async Task AColdStartWithAnUnreachableStoreRunsOnTheCronDeclaredInCode()
+    {
+        // The stored row says "1 January"; the code says hourly. Reads fail, so the row cannot be
+        // seen and the code default has to carry the schedule.
+        await using var host = TickHost.Create(Hourly, storedCron: NewYear);
+        host.Source.FailReads = true;
+
+        await host.TickAsync();                                     // nothing loaded yet
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));    // 11:00, due on the code cron
+
+        var run = Assert.Single(await host.RunsAsync());
+        Assert.Equal(Occurrences.Utc(2026, 8, 24, 11, 0), run.ScheduledFor);
+    }
+
+    /// <summary>
+    /// The fallback is a stopgap, not a latch: the first reload that reaches the store replaces it.
+    /// </summary>
+    [Fact]
+    public async Task TheStoreTakesOverOnceItIsReachableAgain()
+    {
+        await using var host = TickHost.Create(Hourly, storedCron: NewYear);
+        host.Source.FailReads = true;
+
+        await host.TickAsync();               // falls back to the code cron
+        host.Source.FailReads = false;
+
+        // The reload now succeeds, so the stored "1 January" governs and 11:00 is not due. A run
+        // here would mean the process had kept the code default after the store came back.
+        await host.AdvanceAndTickAsync(TimeSpan.FromMinutes(30));
+
+        Assert.Empty(await host.RunsAsync());
     }
 
     [Fact]

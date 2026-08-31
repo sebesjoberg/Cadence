@@ -49,11 +49,24 @@ internal sealed class MutableScheduleSource : IWritableScheduleSource, IDisposab
     private readonly Dictionary<string, JobSchedule> _rows = new(StringComparer.Ordinal);
     private CancellationTokenSource _changed = new();
 
+    /// <summary>
+    /// When set, reads fail the way an unreachable database does. Defaults to false, so the
+    /// conformance suite sees the same double every other test does.
+    /// </summary>
+    public bool FailReads { get; set; }
+
     public Task<IReadOnlyList<JobSchedule>> GetAllAsync(CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<JobSchedule>>([.. _rows.Values]);
+        => FailReads
+            ? Task.FromException<IReadOnlyList<JobSchedule>>(Unreachable())
+            : Task.FromResult<IReadOnlyList<JobSchedule>>([.. _rows.Values]);
 
     public Task<JobSchedule?> GetAsync(string jobName, CancellationToken ct)
-        => Task.FromResult(_rows.TryGetValue(jobName, out var row) ? row : null);
+        => FailReads
+            ? Task.FromException<JobSchedule?>(Unreachable())
+            : Task.FromResult(_rows.TryGetValue(jobName, out var row) ? row : null);
+
+    private static InvalidOperationException Unreachable()
+        => new("The schedule store is unreachable.");
 
     public Task UpsertAsync(JobSchedule schedule, CancellationToken ct)
     {

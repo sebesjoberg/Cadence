@@ -1,4 +1,5 @@
-using Cadence.Diagnostics;
+﻿using Cadence.Diagnostics;
+using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -76,6 +77,29 @@ public sealed class HealthCheckTests
 
         await host.StartAsync();
         Assert.True(readiness.IsReady);
+
+        await host.StopAsync();
+    }
+
+    /// <summary>
+    /// Gap 3's headline claim: a database hiccup must not stop the whole application from starting.
+    /// Boot reads no schedules today -- the change-token poll is fire-and-forget and the first read
+    /// happens on the tick -- and this is what stops that becoming untrue by accident.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreachableScheduleStoreDoesNotStopTheHostStarting()
+    {
+        using var host = new HostBuilder()
+            .ConfigureServices(services => services.AddCadence(cadence => cadence
+                .AddJob<ReportingJob>("scheduled-job", job => job.Cron("0 * * * *"))
+                .UseScheduleSource<MutableScheduleSource>()))
+            .Build();
+
+        ((MutableScheduleSource)host.Services.GetRequiredService<IScheduleSource>()).FailReads = true;
+
+        await host.StartAsync();
+
+        Assert.True(host.Services.GetRequiredService<CadenceReadiness>().IsReady);
 
         await host.StopAsync();
     }

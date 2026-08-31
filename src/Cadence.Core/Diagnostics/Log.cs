@@ -94,6 +94,15 @@ internal static partial class Log
         Message = "Could not read the pause switches. Continuing with {Current}.")]
     public static partial void PauseReadFailed(this ILogger logger, Exception exception, PauseScope current);
 
+    [LoggerMessage(
+        EventId = 1106,
+        Level = LogLevel.Error,
+        Message = "Could not read the schedule store and nothing was loaded yet, so {ScheduledCount} " +
+                  "job(s) are running on the cron declared in code. Any schedule edited through the " +
+                  "dashboard or the store is not in effect. Retrying every reload.")]
+    public static partial void ScheduleStoreUnavailableAtStart(
+        this ILogger logger, Exception exception, int scheduledCount);
+
     // 1200-1299: the tick loop.
 
     [LoggerMessage(
