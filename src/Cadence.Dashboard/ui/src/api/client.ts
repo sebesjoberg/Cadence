@@ -44,6 +44,60 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return await readJson<T>(response)
 }
 
+/** A downloaded result: the bytes, and the name the server suggested for them. */
+export interface Download {
+  blob: Blob
+  fileName: string | null
+}
+
+// Buffered into a Blob rather than pointed at with a plain <a href>, because SessionHeaderFilter
+// demands X-Cadence-Session on every method and an anchor cannot set a header. Exempting the route
+// would be the convenient fix and the wrong one: the header is what stops a cross-site page from
+// issuing requests the ticket cookie authenticates. MaxResultBytes bounds what this holds.
+async function download(path: string): Promise<Download> {
+  const response = await fetch(`${UI}${path}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { [SESSION_HEADER]: '1' },
+  })
+
+  if (response.status === 401) {
+    const stale = response.headers.get('WWW-Authenticate')?.includes(COOKIE_SCHEME) ?? false
+
+    window.location.assign(stale ? `${LOGIN}?prompt=login` : LOGIN)
+
+    throw new UnauthenticatedError(stale)
+  }
+
+  if (!response.ok) {
+    throw await problemFrom(response)
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameFrom(response.headers.get('Content-Disposition')),
+  }
+}
+
+/** Reads the filename out of a Content-Disposition header, preferring the encoded form. */
+export function fileNameFrom(header: string | null): string | null {
+  if (!header) return null
+
+  // filename* wins where both are present: it is the one that survived non-ASCII characters.
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      // A malformed escape sequence is not worth failing a download over; fall through to plain.
+    }
+  }
+
+  const plain = /filename="?([^";]+)"?/i.exec(header)
+
+  return plain ? plain[1] : null
+}
+
 async function problemFrom(response: Response): Promise<ProblemError> {
   const document: Problem = response.headers.get('Content-Type')?.includes(PROBLEM_JSON)
     ? await response.json().catch(() => ({}))
@@ -73,4 +127,5 @@ export const api = {
   post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
+  download,
 }

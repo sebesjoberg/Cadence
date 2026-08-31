@@ -91,3 +91,72 @@ internal sealed class AttributedJob : IJob
 {
     public Task ExecuteAsync(JobContext context, CancellationToken cancellationToken) => Task.CompletedTask;
 }
+
+/// <summary>What a result job is asked for.</summary>
+internal sealed record ReportRequest(string Customer, int Rows);
+
+/// <summary>What a JSON-returning result job hands back.</summary>
+internal sealed record ReportSummary(string Customer, int Rows);
+
+/// <summary>Returns bytes directly, which is the shortest path for a file-producing job.</summary>
+internal sealed class FileResultJob : IResultJob<ReportRequest, JobResult>
+{
+    public Task<JobResult> ExecuteAsync(
+        ReportRequest request,
+        JobContext context,
+        CancellationToken cancellationToken)
+    {
+        var customer = request?.Customer ?? "(scheduled)";
+        return Task.FromResult(JobResult.Csv($"customer,rows\n{customer},{request?.Rows ?? 0}\n", "report.csv"));
+    }
+}
+
+/// <summary>Returns a plain type, so the default JSON serializer has to turn it into bytes.</summary>
+internal sealed class PocoResultJob : IResultJob<ReportRequest, ReportSummary>
+{
+    public Task<ReportSummary> ExecuteAsync(
+        ReportRequest request,
+        JobContext context,
+        CancellationToken cancellationToken)
+        => Task.FromResult(new ReportSummary(request.Customer, request.Rows));
+}
+
+/// <summary>Produces more than any sane ceiling allows.</summary>
+internal sealed class OversizedResultJob : IResultJob<ReportRequest, JobResult>
+{
+    public Task<JobResult> ExecuteAsync(
+        ReportRequest request,
+        JobContext context,
+        CancellationToken cancellationToken)
+        => Task.FromResult(JobResult.Bytes(new byte[4096], "application/octet-stream"));
+}
+
+/// <summary>Returns null, which records a run that produced nothing to collect.</summary>
+internal sealed class NullResultJob : IResultJob<ReportRequest, ReportSummary?>
+{
+    public Task<ReportSummary?> ExecuteAsync(
+        ReportRequest request,
+        JobContext context,
+        CancellationToken cancellationToken)
+        => Task.FromResult<ReportSummary?>(null);
+}
+
+/// <summary>
+/// Implements the result interface twice, so which result a run produces has no answer. Only
+/// reachable by declaring <see cref="IJob.ExecuteAsync"/> as well: without it the compiler rejects
+/// the type outright, because the two inherited default implementations are ambiguous.
+/// </summary>
+internal sealed class AmbiguousResultJob
+    : IResultJob<ReportRequest, JobResult>, IResultJob<string, string>
+{
+    public Task ExecuteAsync(JobContext context, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
+    public Task<JobResult> ExecuteAsync(
+        ReportRequest request, JobContext context, CancellationToken cancellationToken)
+        => Task.FromResult(JobResult.Text("csv"));
+
+    public Task<string> ExecuteAsync(
+        string request, JobContext context, CancellationToken cancellationToken)
+        => Task.FromResult("text");
+}

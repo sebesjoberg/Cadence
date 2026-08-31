@@ -1,4 +1,4 @@
-using Cadence.Storage.Sql.Internal;
+﻿using Cadence.Storage.Sql.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -277,6 +277,7 @@ public sealed class CadenceJanitorTests
 
         var janitor = new CadenceJanitor(
             new SqlStorageMaintenance(database, history, tokens),
+            new InMemoryJobResultStore(),
             janitorOptions,
             clock,
             cadence,

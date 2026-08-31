@@ -84,11 +84,18 @@ public static class CadenceServiceCollectionExtensions
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddSingleton<IScheduleSource, CodeScheduleSource>();
         services.TryAddSingleton<IRunHistoryStore>(_ => new InMemoryRunHistoryStore());
+        services.TryAddSingleton<IJobResultStore>(_ => new InMemoryJobResultStore());
         services.TryAddSingleton<IOccurrenceCoordinator, NoOpOccurrenceCoordinator>();
         services.TryAddSingleton<IPauseStore, InMemoryPauseStore>();
         services.TryAddSingleton<IApiTokenStore, ConfiguredApiTokenStore>();
         services.TryAddSingleton<IInstanceDirectory, InMemoryInstanceDirectory>();
         services.TryAddSingleton<IJobProgressSink, RunHistoryProgressSink>();
+
+        // Open generic first, then the exact-type passthrough. A job returning JobResult binds to
+        // the second and is stored verbatim; everything else falls through to JSON.
+        services.TryAdd(ServiceDescriptor.Singleton(
+            typeof(IJobResultSerializer<>), typeof(JsonJobResultSerializer<>)));
+        services.TryAddSingleton<IJobResultSerializer<JobResult>, JobResultPassthroughSerializer>();
 
         services.TryAddSingleton<CadenceMetrics>();
         services.TryAddSingleton<LastSuccessCache>();

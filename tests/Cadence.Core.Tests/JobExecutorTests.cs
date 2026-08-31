@@ -1,4 +1,4 @@
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using Cadence.Diagnostics;
 using Cadence.Execution;
 using Cadence.Scheduling;
@@ -17,7 +17,7 @@ public class JobExecutorTests
     [Fact]
     public async Task ASuccessfulRunIsRecordedAsSucceeded()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         var result = await fixture.DispatchAsync<SucceedingJob>(Default);
         await fixture.Executor.WaitForIdleAsync();
@@ -33,7 +33,7 @@ public class JobExecutorTests
     [Fact]
     public async Task AThrowingJobIsRecordedAsFailedWithTheException()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         await fixture.DispatchAsync<FailingJob>(Default);
         await fixture.Executor.WaitForIdleAsync();
@@ -46,7 +46,7 @@ public class JobExecutorTests
     [Fact]
     public async Task ExceedingTheMaximumDurationIsRecordedAsTimedOutNotAborted()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         await fixture.DispatchAsync<NeverEndingJob>(
             new RunSettings { Overlap = OverlapPolicy.Skip, MaxDuration = TimeSpan.FromMilliseconds(50) });
@@ -62,7 +62,7 @@ public class JobExecutorTests
     [Fact]
     public async Task ShutdownRecordsAnInFlightRunAsAborted()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         await fixture.DispatchAsync<NeverEndingJob>(Default);
         await fixture.Executor.DrainAsync(TimeSpan.FromSeconds(5));
@@ -74,7 +74,7 @@ public class JobExecutorTests
     [Fact]
     public async Task SkipPolicyRecordsTheSecondOccurrenceAsSkippedWithAReason()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         var first = await fixture.DispatchAsync<GatedJob>(Default);
         var second = await fixture.DispatchAsync<GatedJob>(Default);
@@ -97,7 +97,7 @@ public class JobExecutorTests
     [Fact]
     public async Task AllowConcurrentStartsASecondRunInAScopeOfItsOwn()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
         var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
 
         await fixture.DispatchAsync<GatedJob>(settings);
@@ -118,7 +118,7 @@ public class JobExecutorTests
     [Fact]
     public async Task ThePerInstanceConcurrencyCapSkipsRatherThanQueues()
     {
-        await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
+        await using var fixture = JobExecutorFixture.Create(options => options.MaxConcurrentRuns = 1);
         var settings = new RunSettings { Overlap = OverlapPolicy.AllowConcurrent };
 
         await fixture.DispatchAsync<GatedJob>(settings);
@@ -135,7 +135,7 @@ public class JobExecutorTests
     [Fact]
     public async Task CapacityIsReleasedWhenARunFinishes()
     {
-        await using var fixture = Fixture.Create(options => options.MaxConcurrentRuns = 1);
+        await using var fixture = JobExecutorFixture.Create(options => options.MaxConcurrentRuns = 1);
 
         await fixture.DispatchAsync<SucceedingJob>(Default);
         await fixture.Executor.WaitForIdleAsync();
@@ -150,7 +150,7 @@ public class JobExecutorTests
     [Fact]
     public async Task ReportedProgressLandsInRunHistory()
     {
-        await using var fixture = Fixture.Create();
+        await using var fixture = JobExecutorFixture.Create();
 
         var result = await fixture.DispatchAsync<ReportingJob>(Default);
         await fixture.Executor.WaitForIdleAsync();
@@ -170,67 +170,5 @@ public class JobExecutorTests
         var entry = Assert.Single(run.Log);
         Assert.Equal("processed 400 of 12000", entry.Message);
         Assert.Equal(400, Assert.IsType<int>(entry.Data!["done"]));
-    }
-
-    private sealed class Fixture : IAsyncDisposable
-    {
-        private ServiceProvider _provider = null!;
-
-        public JobExecutor Executor { get; private set; } = null!;
-
-        public InMemoryRunHistoryStore History { get; } = new();
-
-        public JobSpy Spy { get; } = new();
-
-        public static Fixture Create(Action<CadenceOptions>? configureOptions = null)
-        {
-            var fixture = new Fixture();
-
-            var services = new ServiceCollection();
-            services.AddMetrics();
-            services.AddSingleton(fixture.Spy);
-            services.AddScoped<ScopeMarker>();
-            services.AddTransient<SucceedingJob>();
-            services.AddTransient<FailingJob>();
-            services.AddTransient<GatedJob>();
-            services.AddTransient<NeverEndingJob>();
-            services.AddTransient<ReportingJob>();
-
-            fixture._provider = services.BuildServiceProvider();
-
-            var clock = new FakeClock(Occurrences.Utc(2026, 8, 24, 2, 0));
-            var options = new CadenceOptions { InstanceId = "test:1:aaaaaaaa" };
-            configureOptions?.Invoke(options);
-
-            var metrics = new CadenceMetrics(fixture._provider.GetRequiredService<IMeterFactory>());
-
-            fixture.Executor = new JobExecutor(
-                fixture._provider.GetRequiredService<IServiceScopeFactory>(),
-                fixture.History,
-                new RunHistoryProgressSink(fixture.History, clock, NullLogger<RunHistoryProgressSink>.Instance),
-                clock,
-                metrics,
-                Options.Create(options),
-                NullLogger<JobExecutor>.Instance);
-
-            return fixture;
-        }
-
-        public Task<DispatchResult> DispatchAsync<TJob>(RunSettings settings)
-            where TJob : IJob
-            => Executor.DispatchAsync(
-                new JobDescriptor { Name = "job", ImplementationType = typeof(TJob) },
-                settings,
-                scheduledFor: null,
-                TriggerKind.Manual,
-                payload: null,
-                CancellationToken.None);
-
-        public async ValueTask DisposeAsync()
-        {
-            Spy.Gate.TrySetResult();
-            await Executor.DisposeAsync();
-            await _provider.DisposeAsync();
-        }
     }
 }

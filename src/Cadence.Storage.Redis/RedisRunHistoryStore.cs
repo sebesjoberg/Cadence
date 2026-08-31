@@ -1,4 +1,4 @@
-using Cadence.Storage.Redis.Internal;
+﻿using Cadence.Storage.Redis.Internal;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
@@ -47,7 +47,7 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public async Task<JobRun> StartAsync(JobRunStart start, CancellationToken cancellationToken)
+    public async Task<JobRun?> StartAsync(JobRunStart start, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(start);
         cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +61,11 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
         // One script, not a read then a write: the run may already exist because the coordinator
         // wrote it when it claimed the occurrence, and an existence check would cost a round trip
         // on the hot path to learn something the write does not need to know.
-        await database.ScriptEvaluateAsync(
+        // A key is passed even when nothing is exclusive: KEYS has to be a fixed shape for the
+        // script, and the guard on ARGV[8] is what stops the placeholder ever being touched.
+        var exclusive = keys.Exclusive(start.ExclusiveKey ?? "-");
+
+        var outcome = await database.ScriptEvaluateAsync(
             Scripts.Start,
             [
                 keys.Run(start.RunId),
@@ -70,6 +74,7 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
                 keys.InstanceRuns(start.InstanceId),
                 keys.RunningRuns,
                 keys.JobNames,
+                exclusive,
             ],
             [
                 member,
@@ -81,7 +86,13 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
                 (int)RunStatus.Running,
                 start.InstanceId,
                 RedisValues.Argument(startedAt),
+                start.ExclusiveKey ?? string.Empty,
             ]).ConfigureAwait(false);
+
+        if ((long)outcome == 0)
+        {
+            return null;
+        }
 
         return new JobRun
         {
@@ -115,6 +126,7 @@ public sealed class RedisRunHistoryStore : IRunHistoryStore, IAsyncDisposable
                 keys.Parts.JobRuns,
                 (int)RunStatus.Succeeded,
                 keys.Parts.SuccessSuffix,
+                keys.Parts.Exclusive,
             ]).ConfigureAwait(false);
     }
 

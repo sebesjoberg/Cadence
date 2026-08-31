@@ -1,4 +1,4 @@
-using Cadence.Storage;
+﻿using Cadence.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -37,7 +37,7 @@ public sealed class CadenceJanitorTests
         var janitor = CreateJanitor(maintenance);
 
         // No per-pass try/catch inside RunPassAsync -- containing a failed pass so it does not
-        // escalate into a scheduling problem is ExecuteAsync's job, the same as for the other four.
+        // escalate into a scheduling problem is ExecuteAsync's job, the same as for the other passes.
         await Assert.ThrowsAsync<InvalidOperationException>(() => janitor.RunPassAsync(default));
 
         Assert.Contains("purge-tokens", maintenance.Calls);
@@ -46,6 +46,7 @@ public sealed class CadenceJanitorTests
     private static CadenceJanitor CreateJanitor(IStorageMaintenance maintenance) =>
         new(
             maintenance,
+            new InMemoryJobResultStore(),
             new JanitorOptions(),
             new FakeClock(DateTimeOffset.UtcNow),
             Options.Create(new CadenceOptions()),

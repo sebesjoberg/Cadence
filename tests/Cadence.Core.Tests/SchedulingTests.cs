@@ -1,4 +1,4 @@
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using Cadence.Diagnostics;
 using Cadence.Execution;
 using Cadence.Scheduling;
@@ -328,6 +328,7 @@ public class SchedulingTests
             host._executor = new JobExecutor(
                 scopeFactory,
                 host.History,
+                new InMemoryJobResultStore(),
                 new RunHistoryProgressSink(host.History, host._clock, NullLogger<RunHistoryProgressSink>.Instance),
                 host._clock,
                 metrics,

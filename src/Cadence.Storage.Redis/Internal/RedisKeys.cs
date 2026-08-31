@@ -1,4 +1,4 @@
-using StackExchange.Redis;
+﻿using StackExchange.Redis;
 
 namespace Cadence.Storage.Redis.Internal;
 
@@ -49,7 +49,8 @@ internal sealed class RedisKeys
         Occurrence: $"{_prefix}occ:",
         JobRuns: $"{_prefix}runs:job:",
         SuccessSuffix: ":success",
-        InstanceRuns: $"{_prefix}runs:instance:");
+        InstanceRuns: $"{_prefix}runs:instance:",
+        Exclusive: $"{_prefix}excl:");
 
     /// <summary>HASH holding one run's fields.</summary>
     public RedisKey Run(Guid runId) => $"{Parts.Run}{runId:N}";
@@ -66,6 +67,18 @@ internal sealed class RedisKeys
     /// </remarks>
     public RedisKey Occurrence(string jobName, DateTimeOffset scheduledFor)
         => $"{Parts.Occurrence}{jobName}:{scheduledFor.UtcDateTime.Ticks}";
+
+    /// <summary>
+    /// STRING holding the run id that currently holds an exclusive key. This is cluster-strict
+    /// <see cref="OverlapPolicy.Skip"/>.
+    /// </summary>
+    /// <remarks>
+    /// Written in the same script as the run hash, for the reason <see cref="Occurrence"/> is: a
+    /// key taken in one round trip and recorded in another leaves a window where a job is blocked
+    /// by a run nothing can name. Released by the completion write and by the reap, so a dead
+    /// instance blocks its job for a heartbeat timeout rather than forever.
+    /// </remarks>
+    public RedisKey Exclusive(string exclusiveKey) => $"{Parts.Exclusive}{exclusiveKey}";
 
     /// <summary>ZSET of every run, scored by start instant. The index of last resort.</summary>
     public RedisKey AllRuns => $"{_prefix}runs";
@@ -97,6 +110,14 @@ internal sealed class RedisKeys
 
     /// <summary>SET of job names that have ever recorded a run, so the trim pass can iterate.</summary>
     public RedisKey JobNames => $"{_prefix}jobs";
+
+    /// <summary>HASH holding one run's result: its metadata fields plus the bytes.</summary>
+    /// <remarks>
+    /// One key rather than a metadata hash beside a bytes string, so the pair cannot half-expire:
+    /// a TTL is set on the key, and describing a result that has aged out is a miss rather than
+    /// metadata pointing at bytes that are gone.
+    /// </remarks>
+    public RedisKey Result(Guid runId) => $"{_prefix}result:{runId:N}";
 
     /// <summary>HASH of instance id to its registration details.</summary>
     public RedisKey Instances => $"{_prefix}instances";
@@ -152,11 +173,13 @@ internal sealed class RedisKeys
     /// <param name="JobRuns">Prefix a job's run index starts with; the job name follows.</param>
     /// <param name="SuccessSuffix">Appended to a job's run index to reach its success index.</param>
     /// <param name="InstanceRuns">Prefix an instance's run index starts with; the id follows.</param>
+    /// <param name="Exclusive">Prefix of the exclusive-key strings.</param>
     public readonly record struct Fragments(
         string Run,
         string LogSuffix,
         string Occurrence,
         string JobRuns,
         string SuccessSuffix,
-        string InstanceRuns);
+        string InstanceRuns,
+        string Exclusive);
 }

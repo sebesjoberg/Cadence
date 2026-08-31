@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 namespace Cadence.Storage.Conformance;
 
@@ -487,6 +487,103 @@ public abstract class RunHistoryStoreConformance
     /// <param name="runId">The run id.</param>
     /// <param name="jobName">The job name.</param>
     /// <param name="startedAt">When the run began.</param>
+    // ---- Exclusive keys: the cluster-wide half of OverlapPolicy.Skip. ----
+
+    [SkippableFact]
+    public async Task AnExclusiveKeyIsHeldByOneRunAtATime()
+    {
+        var store = await CreateAsync();
+
+        var first = await store.StartAsync(
+            Start(Guid.NewGuid(), "job", Origin) with { ExclusiveKey = "job" }, default);
+
+        var second = await store.StartAsync(
+            Start(Guid.NewGuid(), "job", Origin.AddSeconds(1)) with { ExclusiveKey = "job" }, default);
+
+        Assert.NotNull(first);
+
+        // Null, not an exception: another instance running the job is an expected answer, and the
+        // caller records a skip rather than a failure.
+        Assert.Null(second);
+    }
+
+    [SkippableFact]
+    public async Task AStartCarryingNoKeyIsNeverRefused()
+    {
+        var store = await CreateAsync();
+
+        await store.StartAsync(Start(Guid.NewGuid(), "job", Origin) with { ExclusiveKey = "job" }, default);
+
+        // AllowConcurrent has to stay concurrent even while a Skip run of the same job holds the key.
+        var concurrent = await store.StartAsync(Start(Guid.NewGuid(), "job", Origin.AddSeconds(1)), default);
+
+        Assert.NotNull(concurrent);
+    }
+
+    [SkippableFact]
+    public async Task DifferentKeysDoNotBlockEachOther()
+    {
+        var store = await CreateAsync();
+
+        var a = await store.StartAsync(
+            Start(Guid.NewGuid(), "a", Origin) with { ExclusiveKey = "a" }, default);
+
+        var b = await store.StartAsync(
+            Start(Guid.NewGuid(), "b", Origin) with { ExclusiveKey = "b" }, default);
+
+        Assert.NotNull(a);
+        Assert.NotNull(b);
+    }
+
+    [SkippableFact]
+    public async Task TheKeyIsReleasedByTheOutcomeWrite()
+    {
+        var store = await CreateAsync();
+        var first = Guid.NewGuid();
+
+        await store.StartAsync(Start(first, "job", Origin) with { ExclusiveKey = "job" }, default);
+        await store.CompleteAsync(first, JobRunResult.Success(TimeSpan.Zero, Origin.AddSeconds(1)), default);
+
+        var next = await store.StartAsync(
+            Start(Guid.NewGuid(), "job", Origin.AddSeconds(2)) with { ExclusiveKey = "job" }, default);
+
+        Assert.NotNull(next);
+    }
+
+    [SkippableFact]
+    public async Task TheKeyIsReleasedEvenWhenTheRunFailed()
+    {
+        var store = await CreateAsync();
+        var first = Guid.NewGuid();
+
+        await store.StartAsync(Start(first, "job", Origin) with { ExclusiveKey = "job" }, default);
+        await store.CompleteAsync(first, Failure(Origin.AddSeconds(1)), default);
+
+        // A job that throws must not lock itself out until a heartbeat timeout: the outcome was
+        // recorded, so the key is free.
+        var next = await store.StartAsync(
+            Start(Guid.NewGuid(), "job", Origin.AddSeconds(2)) with { ExclusiveKey = "job" }, default);
+
+        Assert.NotNull(next);
+    }
+
+    [SkippableFact]
+    public async Task ARunDoesNotBlockItselfWhenStartedTwice()
+    {
+        var store = await CreateAsync();
+        var runId = Guid.NewGuid();
+
+        // The claimed-then-started path: the coordinator writes the row, and the executor starts
+        // the same run id a moment later. Blocking on its own key would deadlock every scheduled
+        // run of every Skip job.
+        await store.StartAsync(Start(runId, "job", Origin) with { ExclusiveKey = "job" }, default);
+
+        var again = await store.StartAsync(
+            Start(runId, "job", Origin.AddMilliseconds(5)) with { ExclusiveKey = "job" }, default);
+
+        Assert.NotNull(again);
+    }
+
     protected static JobRunStart Start(Guid runId, string jobName, DateTimeOffset startedAt) => new()
     {
         RunId = runId,

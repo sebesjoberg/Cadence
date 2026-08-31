@@ -1,4 +1,4 @@
-namespace Cadence.Storage.Redis;
+﻿namespace Cadence.Storage.Redis;
 
 /// <summary>Settings for the Redis storage tier.</summary>
 public sealed class RedisStorageOptions
@@ -41,6 +41,26 @@ public sealed class RedisStorageOptions
     /// four intervals.
     /// </remarks>
     public TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Largest result this tier will store, below the host-wide
+    /// <see cref="CadenceOptions.MaxResultBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is where the two storage tiers genuinely stop being interchangeable. SQL Server streams
+    /// a result out of a <c>VARBINARY(MAX)</c> column a buffer at a time; Redis has no streaming
+    /// read, so every byte of a result crosses the wire and sits in memory on both ends at once,
+    /// against a server whose whole dataset is resident. Eight megabytes is a size that behaves;
+    /// forty is a server-wide latency event.
+    /// </para>
+    /// <para>
+    /// Exceeding it throws rather than truncating or silently declining to store, so a job whose
+    /// output outgrew this tier fails visibly on the run that did it. Raise it deliberately, or
+    /// put results somewhere else by registering your own <see cref="IJobResultStore"/>.
+    /// </para>
+    /// </remarks>
+    public long MaxResultBytes { get; set; } = 8L * 1024 * 1024;
 
     /// <summary>How often the janitor purges history, trims per job and reaps abandoned runs.</summary>
     public TimeSpan JanitorInterval { get; set; } = TimeSpan.FromMinutes(5);

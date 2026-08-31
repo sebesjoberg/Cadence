@@ -1,4 +1,4 @@
-using Cadence.Storage;
+﻿using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -53,7 +53,7 @@ internal sealed class RecordingRunHistoryStore(IRunHistoryStore inner) : IRunHis
         return inner.QueryAsync(query, cancellationToken);
     }
 
-    public Task<JobRun> StartAsync(JobRunStart start, CancellationToken cancellationToken)
+    public Task<JobRun?> StartAsync(JobRunStart start, CancellationToken cancellationToken)
         => inner.StartAsync(start, cancellationToken);
 
     public Task CompleteAsync(Guid runId, JobRunResult result, CancellationToken cancellationToken)

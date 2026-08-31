@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Cadence.Storage.Sql.Internal;
@@ -37,33 +37,67 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public async Task<JobRun> StartAsync(JobRunStart start, CancellationToken cancellationToken)
+    public async Task<JobRun?> StartAsync(JobRunStart start, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(start);
 
         var table = _database.Table("CadenceJobRun");
 
-        // One round trip, not a read followed by a write: the claim's row is updated if it is there,
-        // and inserted if it is not. A separate existence check would race with nothing useful and
-        // cost a round trip on the hot path.
-        var sql = $"""
-            UPDATE {table}
-            SET [Trigger]    = @Trigger,
-                Status       = @Status,
-                InstanceId   = @InstanceId,
-                StartedAtUtc = @StartedAtUtc
-            WHERE RunId = @RunId;
+        /*
+            One round trip, not a read followed by a write: the claim's row is updated if it is
+            there, and inserted if it is not.
 
-            IF @@ROWCOUNT = 0
+            The exclusive check is a guarded branch rather than a caught constraint violation, for
+            one reason: this table has two unique indexes, and an INSERT here can legitimately
+            violate UX_CadenceJobRun_Occurrence when another instance holds the slot. Translating
+            every 2601/2627 into "someone else is running it" would turn that genuinely different
+            failure into a silent skip, and telling them apart means reading an index name out of an
+            error message. So the branch answers the question, and the index stays as the backstop
+            that makes the answer true under a race rather than merely likely.
+
+            UPDLOCK, HOLDLOCK is what makes the branch safe: it takes a key-range lock on the
+            exclusive key, so two instances asking at once serialise instead of both seeing nothing.
+            The explicit transaction is what makes that lock outlive the SELECT -- in autocommit,
+            each statement releases its locks before the next one runs, which is exactly the window
+            the check exists to close.
+        */
+        var sql = $"""
+            SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+
+            IF @ExclusiveKey IS NOT NULL AND EXISTS (
+                SELECT 1 FROM {table} WITH (UPDLOCK, HOLDLOCK)
+                 WHERE ExclusiveKey = @ExclusiveKey AND RunId <> @RunId)
             BEGIN
-                INSERT INTO {table}
-                    (RunId, JobName, ScheduledForUtc, [Trigger], Status, InstanceId, StartedAtUtc)
-                VALUES
-                    (@RunId, @JobName, @ScheduledForUtc, @Trigger, @Status, @InstanceId, @StartedAtUtc);
+                COMMIT TRANSACTION;
+                SELECT CAST(0 AS BIT);
+            END
+            ELSE
+            BEGIN
+                UPDATE {table}
+                SET [Trigger]    = @Trigger,
+                    Status       = @Status,
+                    InstanceId   = @InstanceId,
+                    StartedAtUtc = @StartedAtUtc,
+                    ExclusiveKey = @ExclusiveKey
+                WHERE RunId = @RunId;
+
+                IF @@ROWCOUNT = 0
+                BEGIN
+                    INSERT INTO {table}
+                        (RunId, JobName, ScheduledForUtc, [Trigger], Status, InstanceId,
+                         StartedAtUtc, ExclusiveKey)
+                    VALUES
+                        (@RunId, @JobName, @ScheduledForUtc, @Trigger, @Status, @InstanceId,
+                         @StartedAtUtc, @ExclusiveKey);
+                END
+
+                COMMIT TRANSACTION;
+                SELECT CAST(1 AS BIT);
             END
             """;
 
-        await _database.ExecuteAsync(
+        var startedHere = await _database.ScalarAsync<bool>(
             sql,
             command =>
             {
@@ -74,8 +108,14 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
                 SqlValues.AddEnum(command, "@Status", RunStatus.Running);
                 SqlValues.AddText(command, "@InstanceId", start.InstanceId, 200);
                 SqlValues.AddInstant(command, "@StartedAtUtc", start.StartedAt);
+                SqlValues.AddText(command, "@ExclusiveKey", start.ExclusiveKey, 200);
             },
             cancellationToken).ConfigureAwait(false);
+
+        if (!startedHere)
+        {
+            return null;
+        }
 
         return new JobRun
         {
@@ -101,7 +141,8 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
             SET Status         = @Status,
                 CompletedAtUtc = @CompletedAtUtc,
                 DurationMs     = @DurationMs,
-                Error          = @Error
+                Error          = @Error,
+                ExclusiveKey   = NULL
             WHERE RunId = @RunId;
             """;
 
@@ -445,7 +486,11 @@ public sealed class SqlRunHistoryStore : IRunHistoryStore, IAsyncDisposable
             UPDATE TOP (@BatchSize) run
             SET run.Status         = @Lost,
                 run.CompletedAtUtc = @Now,
-                run.DurationMs     = DATEDIFF_BIG(MILLISECOND, run.StartedAtUtc, @Now)
+                run.DurationMs     = DATEDIFF_BIG(MILLISECOND, run.StartedAtUtc, @Now),
+                -- Releases the key a dead instance was holding. This is the only thing that frees a
+                -- Skip job blocked by a process that never recorded an outcome, which is what
+                -- bounds that block by HeartbeatTimeout instead of leaving it forever.
+                run.ExclusiveKey   = NULL
             FROM {_database.Table("CadenceJobRun")} AS run
             LEFT JOIN {_database.Table("CadenceInstance")} AS instance
                 ON instance.InstanceId = run.InstanceId

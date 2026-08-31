@@ -1,4 +1,4 @@
-using Cadence.DependencyInjection;
+﻿using Cadence.DependencyInjection;
 using Cadence.Storage.Sql.Internal;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -86,6 +86,9 @@ public static class CadenceSqlStorageExtensions
         services.Replace(ServiceDescriptor.Singleton<IRunHistoryStore>(
             sp => sp.GetRequiredService<SqlRunHistoryStore>()));
 
+        services.Replace(ServiceDescriptor.Singleton<IJobResultStore>(
+            sp => new SqlJobResultStore(sp.GetRequiredService<SqlDatabase>())));
+
         services.TryAddSingleton(sp => new SqlScheduleSource(
             sp.GetRequiredService<SqlDatabase>(),
             sp.GetRequiredService<SqlStorageOptions>(),
@@ -162,6 +165,7 @@ public static class CadenceSqlStorageExtensions
 
         services.AddSingleton<CadenceJanitor>(sp => new CadenceJanitor(
             sp.GetRequiredService<IStorageMaintenance>(),
+            sp.GetRequiredService<IJobResultStore>(),
             sp.GetRequiredService<JanitorOptions>(),
             sp.GetRequiredService<ISystemClock>(),
             sp.GetRequiredService<IOptions<CadenceOptions>>(),

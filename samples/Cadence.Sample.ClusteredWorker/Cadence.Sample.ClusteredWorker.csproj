@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -38,6 +38,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+  </ItemGroup>
+
+  <!--
+    The sample's dependency, not Cadence's. SalesReportJob returns a JobResult carrying xlsx bytes
+    and a media type; Cadence never learns what a spreadsheet is, which is the point of the
+    IJobResultSerializer seam.
+  -->
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
   </ItemGroup>
 
   <!--

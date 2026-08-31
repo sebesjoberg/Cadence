@@ -1,4 +1,4 @@
-namespace Cadence.Storage;
+﻿namespace Cadence.Storage;
 
 /// <summary>
 /// Keeps a bounded ring of recent runs per job, in process memory.
@@ -23,12 +23,25 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
         => _maxRunsPerJob = Math.Max(1, (options ?? new InMemoryRunHistoryOptions()).MaxRunsPerJob);
 
     /// <inheritdoc />
-    public Task<JobRun> StartAsync(JobRunStart start, CancellationToken cancellationToken)
+    public Task<JobRun?> StartAsync(JobRunStart start, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(start);
 
         lock (_gate)
         {
+            // Derived rather than tracked in an index of its own: a key held by a run the ring has
+            // since trimmed would be a key nothing releases, and a scan of a bounded ring cannot
+            // leak one. The run's own id is excluded so claiming and then starting the same run
+            // does not block itself.
+            if (start.ExclusiveKey is { } key &&
+                _byId.Values.Any(existing =>
+                    existing.Status == RunStatus.Running &&
+                    existing.RunId != start.RunId &&
+                    string.Equals(existing.ExclusiveKey, key, StringComparison.Ordinal)))
+            {
+                return Task.FromResult<JobRun?>(null);
+            }
+
             var run = new MutableRun
             {
                 RunId = start.RunId,
@@ -38,6 +51,7 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
                 InstanceId = start.InstanceId,
                 StartedAt = start.StartedAt,
                 Status = RunStatus.Running,
+                ExclusiveKey = start.ExclusiveKey,
             };
 
             _byId[run.RunId] = run;
@@ -51,7 +65,7 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
             runs.Add(run);
             TrimLocked(runs);
 
-            return Task.FromResult(Snapshot(run));
+            return Task.FromResult<JobRun?>(Snapshot(run));
         }
     }
 
@@ -68,6 +82,10 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
                 run.Duration = result.Duration;
                 run.CompletedAt = result.CompletedAt;
                 run.Error = result.Error;
+
+                // Released by the same write that records the outcome, so there is no instant in
+                // which the run is finished and the key it held is not free.
+                run.ExclusiveKey = null;
             }
         }
 
@@ -273,6 +291,9 @@ public sealed class InMemoryRunHistoryStore : IRunHistoryStore
         public TimeSpan? Duration { get; set; }
 
         public string? Error { get; set; }
+
+        /// <summary>Set while running and exclusive; nulled by the outcome write.</summary>
+        public string? ExclusiveKey { get; set; }
 
         public List<JobLogEntry> Log { get; } = [];
     }

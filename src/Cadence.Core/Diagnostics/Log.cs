@@ -1,4 +1,4 @@
-using Cadence.Storage;
+﻿using Cadence.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Cadence.Diagnostics;
@@ -183,6 +183,13 @@ internal static partial class Log
     [LoggerMessage(EventId = 1307, Level = LogLevel.Information, Message = "{Progress}")]
     public static partial void JobProgress(this ILogger logger, string progress);
 
+    [LoggerMessage(
+        EventId = 1308,
+        Level = LogLevel.Debug,
+        Message = "Run {RunId} of '{JobName}' produced {Bytes} byte(s) of {ContentType} to collect.")]
+    public static partial void ResultStored(
+        this ILogger logger, Guid runId, string jobName, long bytes, string contentType);
+
     // 1400-1499: shutdown.
 
     [LoggerMessage(
@@ -229,4 +236,11 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Purged {Count} expired API token(s).")]
     public static partial void ApiTokensPurged(this ILogger logger, int count);
+
+    [LoggerMessage(
+        EventId = 1504,
+        Level = LogLevel.Information,
+        Message = "Purged {Count} expired run result(s). Their history rows are untouched, so a run " +
+                  "whose result has aged out still reads as having produced one.")]
+    public static partial void ResultsPurged(this ILogger logger, int count);
 }

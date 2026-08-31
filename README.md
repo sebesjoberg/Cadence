@@ -46,10 +46,28 @@ by a store that can only answer once. In SQL the claim **is** the run row; in Re
 written in the same script as the run. Either way there is no window where a slot is taken
 but unrecorded.
 
-The cost of that choice is the paragraph above, and one caveat worth knowing before you
-rely on it: `OverlapPolicy.Skip` is strict within an instance and best-effort across a
-cluster. If a long run is in flight on instance A and instance B claims the next
-occurrence, B runs it.
+The cost of that choice is the paragraph above. It used to have a second half — that
+`OverlapPolicy.Skip` was strict within an instance and best-effort across a cluster — and
+that is no longer true; see below.
+
+### Skip is strict across the cluster
+
+`OverlapPolicy.Skip` means skip, on every instance. A run of a Skip job holds its job name as an
+exclusive key for as long as it is running, and the store admits one holder at a time — a filtered
+unique index in SQL Server, a key taken in the same script as the run in Redis. A second instance
+asking to start gets told no, and records a `Skipped` run saying which.
+
+It is the occurrence claim's mechanism pointed at a second question. The claim asks *has this slot
+been taken*; this asks *is this job running anywhere*. Both are one question answered by a store
+that can only answer once, so neither needs a lease, a TTL, or a fencing token.
+
+**The cost is a bounded block after a crash.** The key lives on the run row, which is what makes it
+impossible to hold one without recording who holds it — but it also means an instance killed
+mid-run leaves the key held. Nothing frees it until the janitor's reap marks that run `Lost`, so a
+Skip job whose owner died is blocked for up to `HeartbeatTimeout` (60 seconds by default) rather
+than starting again on its next occurrence. That is the trade: exclusivity you can rely on, paid
+for with a minute of not running after a hard kill. `OverlapPolicy.AllowConcurrent` takes no key
+and is unaffected.
 
 ### Replicas are failover, not load spreading
 
@@ -64,6 +82,59 @@ three replicas do not divide the work three ways, so do not size a cluster as th
 They are failover capacity that happens to be warm, and failover itself is immediate: kill the
 leader mid-run and the next occurrence is claimed by the next-earliest instance, with the
 interrupted run marked `Lost` once its heartbeat times out.
+
+## Jobs that produce something
+
+A job can return a result, and Cadence will store it and hand it back:
+
+```csharp
+[ScheduledJob(Name = "sales-report", Cron = "0 0 6 * * *")]
+public sealed class SalesReportJob(ISalesService sales) : IResultJob<ReportRequest, JobResult>
+{
+    public async Task<JobResult> ExecuteAsync(
+        ReportRequest request, JobContext ctx, CancellationToken ct)
+    {
+        var rows = await sales.QueryAsync(request?.Customer, ct);
+        return JobResult.Xlsx(Workbook.Build(rows), "sales.xlsx");
+    }
+}
+```
+
+`GET /cadence/api/runs/{id}` then describes the result — media type, filename, length, expiry —
+and `GET /cadence/api/runs/{id}/result` streams the bytes. The dashboard's run detail shows a
+download button wherever one exists.
+
+**`IResultJob<TRequest, TResult>` extends `IJob`.** One job model, one registry, one history: a
+result job is scheduled by cron or started through the API exactly like any other, and the
+inherited `ExecuteAsync` binds `TRequest` from `JobContext.Payload` and discards the result. That
+is what a cron occurrence wants — nothing supplied a request, nothing is waiting to collect one —
+and it means **a scheduled run sees `default` for its request**, which a job that is both
+scheduled and submitted has to answer for.
+
+**Cadence does not know what a result is.** It stores bytes it was told the media type of.
+Returning `JobResult` is the short path for a file; any other `TResult` goes through
+`IJobResultSerializer<TResult>`, which defaults to JSON and is replaceable per type. That seam is
+the reason "is a result a spreadsheet?" is never a question the scheduler has to answer.
+
+Three limits worth knowing before relying on this:
+
+- **`CadenceOptions.MaxResultBytes` is 32 MiB, and exceeding it fails the run.** A result is built
+  in memory and written whole, so without a ceiling a job whose output scales with its input takes
+  the host down the day somebody asks for a year instead of a week. Failing loudly beats storing a
+  truncated file nobody can tell is truncated.
+- **Results are kept for `Retention.ResultMaxAge` — seven days — not the thirty history gets.** A
+  month of rows is free and a month of spreadsheets is not. History outlives its result, so an
+  expired one reads as "this ran and produced something you can no longer download" rather than
+  vanishing. The two 404s say which is which.
+- **Redis caps results an order of magnitude lower** (`RedisStorageOptions.MaxResultBytes`, 8 MiB).
+  This is the one place the tiers are not interchangeable: SQL Server streams a result out of a
+  `VARBINARY(MAX)` column a buffer at a time, and Redis has no streaming read, so every byte sits
+  in memory on both ends. Over the ceiling it throws rather than silently declining.
+
+Nothing supplies a `TRequest` over HTTP yet. `POST /jobs/{name}/trigger` passes no payload on
+either tree, on purpose — [design plan](docs/design-plan.md) §13.2 keeps it from widening into
+"run any job with arbitrary input" — so a request today can only come from an in-process
+`IJobTrigger` call. Submitted work items are what will give one a route of its own.
 
 ## Pausing
 

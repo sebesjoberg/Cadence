@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,6 +17,7 @@ namespace Cadence.Api.Internal;
 [JsonSerializable(typeof(JobDetailResponse))]
 [JsonSerializable(typeof(RunSummaryResponse))]
 [JsonSerializable(typeof(RunDetailResponse))]
+[JsonSerializable(typeof(JobResultResponse))]
 [JsonSerializable(typeof(RunPageResponse))]
 [JsonSerializable(typeof(PauseResponse))]
 [JsonSerializable(typeof(PauseRequest))]

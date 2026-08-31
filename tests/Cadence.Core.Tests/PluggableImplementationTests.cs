@@ -1,4 +1,4 @@
-using Cadence.DependencyInjection;
+﻿using Cadence.DependencyInjection;
 using Cadence.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -111,11 +111,11 @@ internal sealed class CountingHistoryStore : IRunHistoryStore
 {
     public int Started { get; private set; }
 
-    public Task<JobRun> StartAsync(JobRunStart start, CancellationToken ct)
+    public Task<JobRun?> StartAsync(JobRunStart start, CancellationToken ct)
     {
         Started++;
 
-        return Task.FromResult(new JobRun
+        return Task.FromResult<JobRun?>(new JobRun
         {
             RunId = start.RunId,
             JobName = start.JobName,

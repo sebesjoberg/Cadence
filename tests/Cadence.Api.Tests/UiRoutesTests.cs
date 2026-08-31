@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using Cadence.Api.Routing;
 using Cadence.Storage;
@@ -68,6 +68,7 @@ public sealed class UiRoutesTests
                 "GET /cadence/ui/pause",
                 "GET /cadence/ui/runs",
                 "GET /cadence/ui/runs/{id:guid}",
+                "GET /cadence/ui/runs/{id:guid}/result",
                 "POST /cadence/ui/jobs/{name}/trigger",
                 "PUT /cadence/ui/pause",
             ],

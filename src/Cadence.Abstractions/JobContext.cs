@@ -41,6 +41,19 @@ public sealed class JobContext
         = ImmutableDictionary<string, string>.Empty;
 
     /// <summary>
+    /// Deserialises <see cref="Payload"/> into a request type, using web defaults — camel case,
+    /// case-insensitive — because the payload's usual origin is an HTTP body.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="default"/> when there is no payload, which is every cron occurrence.
+    /// Read <see cref="Payload"/> directly for anything these defaults do not cover.
+    /// </remarks>
+    /// <typeparam name="TRequest">The type to bind to.</typeparam>
+    /// <exception cref="JsonException">The payload is not valid for <typeparamref name="TRequest"/>.</exception>
+    public TRequest? Bind<TRequest>()
+        => Payload is { } payload ? payload.Deserialize<TRequest>(JsonSerializerOptions.Web) : default;
+
+    /// <summary>
     /// Records structured progress against this run. The dashboard displays it live and run
     /// history retains it, so it is the right place for "processed 400 of 12,000" rather than
     /// a log line nobody correlates.
