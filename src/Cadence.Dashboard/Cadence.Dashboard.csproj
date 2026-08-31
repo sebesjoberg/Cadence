@@ -69,8 +69,24 @@
     The glob runs here rather than in a static ItemGroup because on a clean tree wwwroot does not
     exist at evaluation time, and an item group evaluated then would embed nothing on the very
     build that produces the files.
+
+    The second hook is what stops `dotnet pack` warning where `dotnet build` does not. Pack evaluates
+    this project a second time to collect its output groups, and that pass reaches PrepareResourceNames
+    without ever going through BeforeBuild, so the items were empty in that pass alone and the Embedded
+    package's _CalculateEmbeddedFilesManifestInputs warned. That warning carries no code, so NoWarn
+    cannot reach it and the fix has to be giving both passes the same items.
+
+    The hook names that private target rather than PrepareResourceNames because the package prepends it
+    to PrepareResourceNamesDependsOn, and DependsOnTargets run before a BeforeTargets hook on the
+    parent. Setting the property here would not work either: NuGet imports the package's targets after
+    this file, so its prepend would land ahead of ours. If a future package version renames the target
+    the hook stops firing and the warning returns, which is visible rather than silent, and the packed
+    assembly is unaffected either way. Both targets are incremental on wwwroot/.build-stamp, so the
+    extra hook starts no external process on an up-to-date tree.
   -->
-  <Target Name="CadenceEmbedSpa" BeforeTargets="BeforeBuild" DependsOnTargets="CadenceBuildSpa">
+  <Target Name="CadenceEmbedSpa"
+          BeforeTargets="BeforeBuild;_CalculateEmbeddedFilesManifestInputs"
+          DependsOnTargets="CadenceBuildSpa">
     <ItemGroup>
       <EmbeddedResource Include="wwwroot/**/*" Exclude="wwwroot/.build-stamp" />
     </ItemGroup>

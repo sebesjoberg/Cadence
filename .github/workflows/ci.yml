@@ -87,7 +87,13 @@ jobs:
 
               unit = root.find(f'{ns}TestDefinitions/{ns}UnitTest')
               name = os.path.basename(unit.get('storage', path)) if unit is not None else path
-              got = [int(counters.get(k, 0)) for k in ('total', 'passed', 'failed', 'notExecuted')]
+
+              # Skips come from total minus executed, not from @notExecuted: the logger leaves that
+              # counter at 0 even when results carry outcome="NotExecuted", so this column read zero
+              # for every suite before. @executed counts the tests that actually ran.
+              total = int(counters.get('total', 0))
+              executed = int(counters.get('executed', total))
+              got = [total, int(counters.get('passed', 0)), int(counters.get('failed', 0)), total - executed]
 
               rows.append((name.removesuffix('.dll'), *got))
               totals = [a + b for a, b in zip(totals, got)]
@@ -101,10 +107,49 @@ jobs:
                   print('| `{}` | {} | {} | {} | {} |'.format(*row), file=out)
               print('| **Total** | **{}** | **{}** | **{}** | **{}** |'.format(*totals), file=out)
 
+          # A tier whose fixtures cannot reach Docker skips almost everything in the assembly, and
+          # a green tick over 3 tests looks exactly like one over 139. So: fail when a tier
+          # produced no results, or when a quarter of it skipped.
+          #
+          # A ratio rather than zero because some skips are legitimate and permanent -- they encode
+          # real differences between the tiers, the same way the in-memory tier's cross-instance
+          # pause test does. Today that is TheNoStorageTierHasNoAdministerHalf on both tiers, and
+          # PurgingHonoursTheBatchSize on Redis, where a token key carries its own TTL and there is
+          # no batch to size. Those are 1 of 139 and 2 of 105; a broken daemon is nearer 95%.
+          # Matched case-insensitively: the trx logger lowercases the assembly path it records.
+          strict = ('cadence.storage.sql.tests', 'cadence.storage.redis.tests')
+          seen = {name.lower(): (total, skipped) for name, total, _passed, _failed, skipped in rows}
+          problems = []
+
+          for name in strict:
+              if name not in seen:
+                  problems.append(f'{name} produced no results at all')
+                  continue
+
+              total, skipped = seen[name]
+              if total == 0:
+                  problems.append(f'{name} ran no tests')
+              elif skipped * 4 > total:
+                  problems.append(
+                      f'{name} skipped {skipped} of {total} tests, which is too many to be the '
+                      'known tier differences -- it looks like it never reached a real server')
+
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               for key, value in zip(('total', 'passed', 'failed', 'skipped'), totals):
                   print(f'{key}={value}', file=out)
+              print('strict_skips={}'.format('; '.join(problems)), file=out)
           PY
+
+      # Kept out of the summary step so the table still publishes when this is what failed.
+      - name: Require both storage tiers to have actually run
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        run: |
+          problems='${{ steps.summary.outputs.strict_skips }}'
+          if [ -n "$problems" ]; then
+            echo "::error::Storage tiers did not run against a real server: $problems"
+            exit 1
+          fi
+          echo "Both storage tiers ran, with no skips."
 
       # Third party holding checks: write, so pinned by digest. a43b3a5 is v3.0.0.
       - name: Publish test report

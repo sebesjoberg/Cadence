@@ -169,9 +169,8 @@ Distributed pause and one-`MapCadence()`-or-two are settled and owned elsewhere:
 The gaps still open are tracked as debt in [`plan-to-1.0.md`](plan-to-1.0.md) — *Debt to clear before
 1.0*: **#2** (a 1s tick that re-evaluates every job does not scale; needs an in-memory min-heap of
 next occurrences, rebuilt when the change token fires), **#3** (boot must not fail on a schedule-store
-blip — the degraded-health half shipped in §13.4, the boot-fallback half did not), **#7** (warn at boot
-if alerting is enabled without a persistent store), **#8** (`dotnet pack`'s
-`GenerateEmbeddedFilesManifest` warning).
+blip — the degraded-health half shipped in §13.4, the boot-fallback half did not) and **#7** (warn at
+boot if alerting is enabled without a persistent store).
 
 Numbered as first written, so the references from §13 still resolve. **Closed since:** **#1** (`Skip`
 across instances — a run of a `Skip` job holds its job name as an exclusive key on the run row, so a
@@ -180,7 +179,10 @@ reap, which is why the README documents a bounded block rather than a best-effor
 ids need ICU — `CronParser` detects it and names `InvariantGlobalization`), **#5**
 (`IWritableScheduleSource` split out), **#6** (`JobContext.Report` batching — flush on 100 entries or
 250 ms, drop rather than block, because back-pressure on `Report` would make a slow database into a
-slow job).
+slow job), **#8** (`dotnet pack`'s `GenerateEmbeddedFilesManifest` warning — `CadenceEmbedSpa` hung off
+`BeforeBuild` only, and pack's output-group pass reaches `PrepareResourceNames` without going through
+it, so the item list was empty in that pass alone; the warning carries no code and could not be
+suppressed, so the target now also hooks the manifest-inputs target that raises it).
 
 ---
 ## 9. Measured behaviour and deliberate deviations
@@ -495,9 +497,10 @@ already has schedule sources backed by a database. A second one-line test assert
 carries no reference to `Microsoft.AspNetCore.*` at all.
 
 Storage health is reported to humans, alerting and the dashboard, never to the kubelet, and reports
-`Degraded` rather than `Unhealthy`. This is where gap #3's "report degraded health" lands. Pinned by
-a test against a closed port; the tests that exercise it against a live SQL Server or Redis are
-written but have not run on a machine with Docker, so nothing here is verified against a real store.
+`Degraded` rather than `Unhealthy`. This is where gap #3's "report degraded health" lands. Verified
+both ways on both tiers: `AnUnreachableDatabaseIsDegradedNotUnhealthy` and its Redis twin need no
+container, and `AReachableDatabaseIsHealthy` / `AReachableRedisIsHealthy` run against a real server —
+in CI, and now confirmed locally. CI fails if either tier's suite skips its way past a real store.
 
 `AddCadence()`, `UseSqlStorage()`, `UseRedisStorage()` and `AddApi()` are each safe to call twice.
 Health-check registration is guarded explicitly, because the health-check service throws on a

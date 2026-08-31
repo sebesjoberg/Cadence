@@ -12,7 +12,8 @@ namespace Cadence.Api.Routing;
 
 /// <summary>
 /// The operator tree, mounted by <c>Cadence.Dashboard</c>. Public only because that is a separate
-/// assembly and this repo does not use <c>InternalsVisibleTo</c>; it is not a supported API.
+/// assembly, and the <c>InternalsVisibleTo</c> entries in this repo grant a project access to its own
+/// test project rather than to another shipped assembly; it is not a supported API.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class CadenceUiRoutes

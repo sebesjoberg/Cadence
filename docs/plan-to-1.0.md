@@ -473,9 +473,9 @@ the sprawl v0.5 exists to remove.
 |---|---|---|---|
 | Gap 2 | Tick re-evaluates every job every second; needs the min-heap of next occurrences, rebuilt on the change token | medium | Scales with job count. Do it **between v0.5 and v0.6** so the enqueue path is settled first and the alerting sweep is built on it |
 | Gap 3 | Boot fails on a schedule-store blip. Start from code defaults, report degraded, alert | small | A database hiccup must not stop the application starting. The degraded-health half shipped in §13.4; the boot half did not |
-| Gap 8 | `dotnet pack` logs a `GenerateEmbeddedFilesManifest` warning `build` never does | small | `pack` is what publishes. Settle with `dotnet pack /bl` |
-| — | Storage degraded-health tests have never run against a live store — written on a machine without Docker | small | CI has real servers; run them there and stop caveating the claim |
-| — | `CadenceUiRoutes.cs:15` states the repo uses no `InternalsVisibleTo`. Three exist (Core, Sql, Redis → their own test projects) | trivial | The justification for that public seam rests on the sentence being true. The argument survives; the wording does not |
+| ~~Gap 8~~ | ~~`dotnet pack` logs a `GenerateEmbeddedFilesManifest` warning~~ | — | **Done.** `CadenceEmbedSpa` hung off `BeforeBuild` only, which pack's output-group pass never reaches. It now also hooks the manifest-inputs target. Clean-tree pack verified to still embed the bundle |
+| ~~—~~ | ~~Storage degraded-health tests have never run against a live store~~ | — | **Done.** They run, and pass, on both tiers. CI now fails when a tier skips its way past a real server instead of reporting a green tick over three tests |
+| ~~—~~ | ~~`CadenceUiRoutes.cs:15` claims the repo uses no `InternalsVisibleTo`~~ | — | **Done.** Reworded to what is true: the three entries grant a project access to its own test project, not to another shipped assembly |
 
 ---
 
@@ -511,10 +511,10 @@ at real published versions.
 
 ## Order of work
 
-1. **Name decision.** No code. Blocks publishing and gets more expensive weekly.
-2. **The trivial debt** — the `CadenceUiRoutes` comment; run the storage-health tests in CI.
-3. **Gap 8**, because publishing depends on `pack` and the answer is one binary log away.
-4. **Gap 3**, the boot fallback. Small, and a correctness hole rather than polish.
+1. **Name decision.** No code. Blocks publishing and gets more expensive weekly. **Still open — yours.**
+2. ~~The trivial debt~~ — **done.**
+3. ~~Gap 8~~ — **done**, and it was a real defect rather than a logging artifact.
+4. **Gap 3**, the boot fallback. Small, and a correctness hole rather than polish. **Next.**
 5. **v0.5 — queue the claim, pull the work.** The breaking semantics land here, pre-1.0.
 6. **Gap 2**, the min-heap, on the settled enqueue path.
 7. **v0.6 — alerting.** The watchdog is a queue item, not a sixth coordination design.
