@@ -141,6 +141,10 @@ public static class CadenceRedisStorageExtensions
 
         services.AddHostedService(sp => sp.GetRequiredService<RedisInstanceRegistry>());
 
+        // Plain AddSingleton, not TryAdd: AddCadence offers InMemoryInstanceDirectory with TryAdd
+        // after the configuration callback has run, so this registration wins.
+        services.AddSingleton<IInstanceDirectory, RedisInstanceDirectory>();
+
         services.TryAddSingleton<IStorageMaintenance>(sp =>
             new RedisStorageMaintenance(sp.GetRequiredService<RedisConnection>()));
 

@@ -161,7 +161,7 @@ unparseable durations. The graph is validated at boot, from a scope. Do not prom
 | — | **decision point** | *resolved — see below* |
 | v0.3 | Control surface | the machine-callable API, the auth gate, health checks, distributed pause — *done* |
 | v0.3.1 | Identity | OIDC sign-in; API tokens with scopes on both tiers; their conformance suite; the key ring — *done* |
-| v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time |
+| v0.4 | Dashboard | overview, detail, schedule editing, manual trigger; React + Vite + Mantine, oxlint and oxfmt, bundle embedded at pack time — *done* |
 | v0.5 | Alerting | rules, throttling, watchdog, SMTP + Twilio |
 | v0.6 | Tooling | source-generated registration, analyzers, test host |
 
@@ -218,12 +218,23 @@ a probe that fails on a store blip fails on all of them at once.*
 **Gap 7. Alert state in memory means a crash-loop resets cooldowns and floods.** Warn at
 boot if alerting is enabled without a persistent store.
 
+**Gap 8. `dotnet pack` logs a `GenerateEmbeddedFilesManifest` warning that `dotnet build` never
+does, for `Cadence.Dashboard`.** Two clean-tree packs both produced a correctly embedded bundle —
+the packed DLL's manifest resources were verified directly both times — so the warning is most
+likely logged against a project-instance evaluation distinct from the one that produces the packed
+output, an artifact of `pack`'s own evaluation pass rather than a real defect. Not settled: run
+`dotnet pack /bl` and read the binary log for `GenerateEmbeddedFilesManifest` and `EmbeddedResource`
+to confirm which project instance logs the warning and which one the packed DLL came from. Does not
+gate CI, which runs `build`, not `pack` — but `pack` is what publishes, so this should be confirmed
+rather than left on the strength of looking fine twice.
+
 ---
 
 ## 9. Measured behaviour and deliberate deviations
 
 Recorded here because each was an assumption in the original spec that turned out to need
-correcting. All are pinned by tests in `Cadence.Core.Tests` or `Cadence.Storage.Sql.Tests`.
+correcting. All but §9.6, which is a measurement rather than a behaviour, are pinned by tests in
+`Cadence.Core.Tests` or `Cadence.Storage.Sql.Tests`.
 
 ### 9.1 Daylight saving, measured against Cronos 0.8.4 / Europe/Stockholm
 
@@ -297,6 +308,26 @@ constraint holds — a test asserts `Cadence.Core`'s assembly carries no referen
 `Microsoft.AspNetCore.*`, even transitively — but the cost is real and worth naming: every Core
 consumer now gets `DefaultHealthCheckService` and the health-check publisher hosted service, the
 latter inert with no publisher registered. Recorded so nobody rediscovers it as a violation.
+
+### 9.6 What the dashboard bundle weighs
+
+Spec §10 risk 5 wanted the number recorded so a later regression is visible. The figure taken at
+first build — 194.5 kB raw, 60.8 kB gzipped — was React over a placeholder route, measured before
+Mantine, the three TanStack packages and the screens themselves landed. What v0.4 actually ships,
+from `src/Cadence.Dashboard/wwwroot/assets` after a Release build:
+
+| File | Raw | Gzipped |
+|---|---|---|
+| `index-*.js` | 601.4 kB | 185.2 kB |
+| `index-*.css` | 202.3 kB | 29.4 kB |
+| **Total** | **803.6 kB** | **214.6 kB** |
+
+Gzipped with `gzip` at its default level, which is the comparison Vite's own build report makes.
+That is 3.5× the gzipped figure first recorded, and the reason it is replaced here rather than
+annotated in a commit message: a baseline that far out measures nothing, and this is the number the
+next change has to be compared against. Cadence compresses nothing itself — the assets are embedded
+in the assembly and streamed by an endpoint — so what a browser receives is whatever the host has
+configured.
 
 ---
 
@@ -409,11 +440,18 @@ exactly this:
 ```csharp
 builder.Services.AddCadence(cadence => cadence
     .UseSqlStorage(connectionString)
-    .AddApi(api => api.BasePath = "/cadence"));
+    .AddApi());
 
 app.MapCadenceApi();          // v0.3
 // app.MapCadenceDashboard(); // v0.4
 ```
+
+v0.4 drops the option that snippet used to set: `CadenceApiOptions` no longer has a `BasePath`, and
+every route is fixed at `/cadence` — `CadenceApiDefaults.BasePath` and the three paths derived from
+it. The dashboard bundle ships prebuilt inside the NuGet package, so there is no build step in the
+consuming application left to bake a configured prefix into; a `BasePath` a host could still set
+would have been a promise the SPA had no way to keep. Fixing it is what lets the bundle work out of
+the box rather than needing a rebuild the package cannot supply.
 
 `MapCadenceApi()` returns the `RouteGroupBuilder` it mounted, so a host can attach its own
 conventions — rate limiting, CORS, OpenAPI metadata — to the tree it just added. For endpoints that
@@ -722,7 +760,7 @@ default) is checked against the ticket's `auth_time` — when the user authentic
 not when the ticket was minted — and a stale one answers 401 with `WWW-Authenticate: CadenceCookie`
 rather than 403: the fix is one redirect back through the provider, not a permissions problem, and
 the status code says which. That redirect has to be a real re-authentication, so
-`{BasePath}/api/auth/login?prompt=login` asks the provider for one and the refusal's `detail` names
+`/cadence/api/auth/login?prompt=login` asks the provider for one and the refusal's `detail` names
 that route. A plain challenge would not do: `auth_time` is the authentication instant, so an SSO
 re-entry answered by the provider's live session returns the same value and the same 401, and the
 advice would be a loop.
@@ -764,14 +802,14 @@ missing `id_token_hint` as an error regardless, a refusal page) rather than sign
 observed against Keycloak in `samples/README.md` step 9.
 
 **A provider-initiated sign-out must name the session it is ending.** `RemoteSignOutPath`
-(`{BasePath}/signout-oidc`) is handled by the OIDC handler inside the authentication middleware,
+(`/cadence/signout-oidc`) is handled by the OIDC handler inside the authentication middleware,
 before routing, so no endpoint filter reaches it and §4.5's session-header rule does not cover it.
 The framework skips its own `sid` comparison when the request carries no `sid`, which left an
 `<img src="…/signout-oidc">` on any page able to sign an operator out. `OnRemoteSignOut` now requires
 a `sid` that matches the current ticket's — which is why `sid` is on §4.3's allow-list — and answers
 400 otherwise.
 
-**The realm's post-logout redirect is `{BasePath}/signout-callback-oidc`**, not
+**The realm's post-logout redirect is `/cadence/signout-callback-oidc`**, not
 `SignedOutRedirectUri` (`/cadence`). The callback path is the leg the provider itself redirects back
 to and must have registered; the redirect URI is a hop Cadence makes afterward, from its own callback
 handler, which the provider never sees. Registering the redirect URI instead yields a Keycloak 400 —
@@ -793,9 +831,80 @@ documenting before someone deploys it:
 
 So the supported shape is every replica mapping the API. `MapCadenceApi()` does **not** throw on an
 empty registry — registering jobs behind a feature flag is legitimate, and a hard failure would
-break it. Instead it warns at map time, and the trigger endpoint's 404 names the cause: *no job
-named 'x' is registered in this instance (0 jobs registered)*. A misconfigured pod then diagnoses
-itself from one response body.
+break it. Instead it warns at map time, and the trigger endpoint's 404 names the cause: *No job is
+registered under the name 'x'. This replica has 0 registered job(s); a replica that hosts only the
+dashboard has none.* The job-detail read and the schedule pair answer with the same count, from the
+same `ProblemMapper.JobNotFound`, so a misconfigured pod diagnoses itself from whichever response
+body reaches the operator first.
+
+### 13.7 What the dashboard settled
+
+v0.4 is `AddDashboard()`, `MapCadenceDashboard()` and the React SPA the package embeds. Five
+decisions are worth recording here rather than leaving them to be re-derived from the code.
+
+**Paths stopped being configurable.** §13.1 already states the consequence — `CadenceApiOptions` has
+no `BasePath` any more, and every route is fixed under `/cadence` — but the dashboard is the reason
+it had to happen, not the API. The bundle ships prebuilt inside the NuGet package: there is no build
+step left in the consuming application to bake a configured prefix into, because the application
+never compiles the SPA at all. A `BasePath` a host could still set would have been a promise the
+bundle had no mechanism to keep — every fetch it makes would either hardcode `/cadence` and ignore
+the setting, or the setting would silently do nothing, and both are worse than not offering it.
+Fixing the path is what lets the package work unpacked, with nothing to configure and nothing to
+get out of sync.
+
+**The dashboard's gate is the API's, one row narrower.** `MapCadenceDashboard()` reaches the same
+four terminal outcomes §13.3's table gives `MapCadenceApi()` — a named host policy governs; nothing
+governs and `AllowUnauthenticated` is set, warned; nothing governs and this is `Development`,
+loopback only; nothing governs anywhere else, throw — but "something governs" is computed from a
+narrower signal. The machine tree accepts a host policy, a signed-in user's cookie, *or* a bare
+configured token, because a token is a legitimate machine credential. The dashboard accepts a host
+policy or a cookie, and stops there: a token is presented in an `Authorization` header, and no
+browser sends one on the request that loads a page, so a deployment holding only a token is exactly
+as unauthenticated from the dashboard's point of view as one holding nothing at all. A token-only
+configuration therefore throws at `MapCadenceDashboard()` even though it satisfies `MapCadenceApi()`
+right next to it — the same options object producing two verdicts because the two trees ask it
+different questions, not because they disagree about one.
+
+**`CadenceUiRoutes` is a public seam paid for by the absence of `InternalsVisibleTo`.** The operator
+tree the dashboard calls reuses seven of the machine tree's own handlers — reads, runs, pause,
+instances, health, tokens, schedule — rather than copying them, because a copy is a second place
+every future field and every future refusal has to be kept identical in, and nothing forces that:
+it is exactly the kind of drift a test would eventually catch and a changelog would not explain.
+The alternative was `InternalsVisibleTo`, and this codebase does not reach for it: it names one
+friend assembly today and grows silently permissive as more are added, where a public type reviewed
+once says plainly what crosses the boundary. The cost is `CadenceUiRoutes` and
+`CadenceUiMapOptions`, two public types in a
+`Cadence.Api.Routing` namespace, `[EditorBrowsable(Never)]` so nothing points a consumer at them by
+accident, existing solely so `Cadence.Dashboard` — a separate assembly — can call in. They are not a
+supported API, and the type's own doc comment says so; the honesty of that label is what the whole
+trade rests on.
+
+**The schedule write, and the Manual trigger, are a person's and not a scope's.** §13.2 drew that
+line for the machine tree — a token can start work and stop it, only a person changes when work
+happens — and the dashboard does not reopen it. `ScheduleEndpoints` requires a *user principal*, the same check `TokenEndpoints`
+already made for credential administration, not `Operate`: an `Operate`-scoped token can already
+trigger and pause, and widening that same scope to cover schedule writes would hand a machine
+credential the trust this line reserves for a person, rather than adding a fourth thing the scope
+means. Scopes describe what a machine may do; this is a decision about who may do it, and the two
+are orthogonal on purpose. The operator tree's trigger takes the same check, one remove out: it is
+the route that records `TriggerKind.Manual`, and a history that cannot separate someone clicking
+from something calling us is the whole reason that second route exists. A token loses nothing by
+it — `/cadence/api/jobs/{name}/trigger` is still open to `Operate` and records `Api`, which is the
+true answer for a machine.
+
+One exception, and it is the one §13.5 already states for token administration: a host-named policy
+governs alone. Under it Cadence adds no check of its own, so whatever that policy admits may rewrite
+a schedule and may record a `Manual` run — `CadenceUiRoutes` derives both from `PolicyName is null`,
+so the two cannot drift apart. A deployment that wants the person/machine line drawn inside a policy
+of its own has to draw it there; the alternative is Cadence overruling a policy the host named, which
+§13.3's table settles against everywhere else.
+
+**Schedule edits are audited to the log, and only the log.** `ScheduleEndpoints.PutAsync` writes
+event `3007` — job name, changed-by, old cron, new cron — and nothing more durable. That is enough
+to answer "who changed this and to what" from the logs a deployment already ships, and not enough to
+answer it after log retention expires, or to list every edit a given operator has ever made. §14.5
+records the table that would close that gap, parked rather than built: v0.4 shipped the write and
+the one-line trail, and stopped there.
 
 ---
 
@@ -907,3 +1016,32 @@ demonstration rather than a deployment. A docker-compose PoC — real containers
 workers behind a load balancer — is where §14.3 could be shown to someone rather than asserted:
 kill the leader and watch the next claim move, shorten the grace period and watch a run land as
 `Lost`.
+
+### 14.5 A schedule audit table
+
+§13.7 records what v0.4 shipped instead: event `3007`, one log line per edit, naming the job, the
+changed-by identity, and the cron before and after. That answers "who changed this and to what" for
+as long as logs are retained and nothing else — not "list every edit an operator has made," not "what
+was the timezone before," not a record that survives past log rotation. This is the table that would
+close those gaps, and the reason it is parked rather than built is that a job's full schedule is more
+than its cron: `Overlap`, `MaxDuration` and `Settings` all change too, and a table logging only the
+field the current message happens to name would need a second migration the day someone asks why
+`MaxDuration` has no history.
+
+```sql
+CREATE TABLE CadenceScheduleAudit (
+    Id            BIGINT IDENTITY PRIMARY KEY,
+    JobName       NVARCHAR(200) NOT NULL,
+    ChangedAtUtc  DATETIME2(3)  NOT NULL,
+    ChangedBy     NVARCHAR(200) NOT NULL,
+    PreviousJson  NVARCHAR(MAX) NULL,   -- NULL for a job's first override
+    NewJson       NVARCHAR(MAX) NOT NULL
+);
+```
+
+One row per write, the whole schedule serialised on each side rather than a column per field, so a
+future field added to `JobSchedule` is covered without a migration. Not built because nothing in
+v0.4 reads it back — there is no screen to show it on, and building the table before the screen that
+would use it is the same mistake §7 already declined to make for `QueueOne`. Redis would carry the
+same rows as a capped list per job (`LPUSH` plus `LTRIM`), which is a second thing to keep in step
+with SQL and one more reason this is recorded rather than started.

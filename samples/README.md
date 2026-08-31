@@ -467,7 +467,7 @@ comments, so what is in it belongs here:
 | Realm | `cadence` | issuer `http://localhost:8080/realms/cadence`, or `:8081` on the Redis AppHost |
 | Client | `cadence-dashboard`, confidential, standard flow only | Cadence is a server-side client and holds a secret; there is no implicit or password grant to enable |
 | Secret | `cadence-dashboard-secret` | in the file on purpose, like the `deadbeef` token: the right shape, obviously not a secret |
-| Redirect URIs | `http://localhost:5080/cadence/signin-oidc` and `:5081` | the callback is under `BasePath`, not at the framework's `/signin-oidc`, so a realm copied from a tutorial names the wrong path |
+| Redirect URIs | `http://localhost:5080/cadence/signin-oidc` and `:5081` | the callback sits under Cadence's fixed `/cadence` prefix, not at the framework's `/signin-oidc`, so a realm copied from a tutorial names the wrong path |
 | Post-logout URIs | `http://localhost:5080/cadence/signout-callback-oidc` and `:5081` | the *provider's* return leg, not `SignedOutRedirectUri` — the browser reaches `/cadence` one hop later |
 | Realm role | `cadence-operator` | mapped into the ID token as a flat `cadence_role` claim, because Keycloak's default `realm_access.roles` is nested JSON no claim comparison can read |
 | User | `admin` / `admin123!`, holding that role | the claim is checked in `OnTokenValidated`, so a user without it is refused at the callback and never holds a session |
@@ -486,8 +486,9 @@ Keycloak authenticates may trigger jobs and pause the cluster. A sample should n
 configuration the product warns about.
 
 **Sign in.** Open `$b/cadence/api/auth/login` in a browser, and Keycloak asks for `admin` /
-`admin123!`. You land back on `$b/cadence`, which is a 404 until `Cadence.Dashboard` in v0.4, holding
-a `cadence.session` cookie. Copy its value out of devtools:
+`admin123!`. You land back on `$b/cadence` — the dashboard shell, `Cadence.Dashboard` being mapped
+alongside the API in this sample — holding a `cadence.session` cookie. Copy its value out of
+devtools:
 
 ```powershell
 $s = '<the cadence.session value>'
@@ -594,6 +595,38 @@ That is the whole list. Signing out is *not* on it: Cadence names the client on 
 request for every provider, because the ticket carries no `id_token` to hint with and RP-Initiated
 Logout permits `client_id` in its place. Keycloak refuses the request outright without one, which is
 how that came to be Cadence's behaviour rather than this sample's.
+
+### 10. The dashboard
+
+Everything above drove the machine tree with `curl.exe`. `Cadence.Dashboard` is v0.4, and this
+sample's worker maps it too — `AddDashboard()` in place of `AddApi()` in `Program.cs` (it calls
+`AddApi()` for you; §13.1 keeps one options object across both), and `MapCadenceDashboard()` beside
+the `MapCadenceApi()` already there. Same options, same gate, same three replicas behind one proxy.
+
+Open `http://localhost:5080/cadence` (`:5081` for the Redis AppHost) and sign in the same way step 9
+just did, `admin` / `admin123!`. The header names the deployment: `Cadence sample (SQL Server)` or
+`Cadence sample (Redis)` — the two AppHosts share one worker project, and the title is what tells the
+two tabs apart, exactly the reason `CadenceDashboardOptions.Title` exists.
+
+**Edit a schedule.** Open `tick-tock` and change its cron — `*/20 * * * * *` — then Save. That is the
+write §13.2 reserves to a signed-in person rather than a token: the same store column the SQL and
+Redis hand-edits earlier in this document reach, done here through a form instead of `INSERT` or
+`HSET`. Leave that tab open, load the dashboard in a second window against the *other* replica's
+share of the proxy, and watch its own copy of the job pick up the new cron within
+`SchedulePollInterval` — 5 seconds in this sample, on both tiers, because the demo timings are
+shared and the change reaches every replica the same way a hand-edit did.
+
+**Trigger a job by hand.** Click Trigger on `reindex-catalog`. Its run lands in Runs with
+`trigger: Manual` — not `Api`, which is what every `curl.exe` trigger above recorded. Same dispatch,
+same history table, different `TriggerKind`, because `UiTriggerEndpoints` is a route of the operator
+tree's own precisely so the two are never confused after the fact (`src/Cadence.Api/Internal/UiTriggerEndpoints.cs`).
+
+**What the dashboard does not do.** The schedule form edits cron, timezone, enabled, overlap and
+maximum duration; a job's `Settings` are shown in the same form, read verbatim off the stored
+schedule, and carried through a save unchanged — there is no settings editor in v0.4. And the only
+record of who changed a cron is the log line `ScheduleEndpoints` writes (`Cadence.Api[3007] Cadence's
+schedule for 'tick-tock' was changed by ...`); there is no audit table behind it. Design plan §14
+records the one that would exist if this were built, parked rather than shipped.
 
 ## What actually differs
 
@@ -776,9 +809,7 @@ restart, every `instanceId` in every response is the same string, and there is n
 anyone else to lose the race for. `GET /cadence/api/health/storage` answers
 `{"status":"Healthy","checks":[]}` — an empty list, because there is no store to check.
 
-**What the samples still cannot show.** A history view and schedule editing in a UI: both are
-`Cadence.Dashboard`, v0.4. The Aspire dashboard covers live telemetry per replica, but it reads OTel
-rather than run history, so "what ran last Tuesday" is still a store query. Nor the loopback filter,
+**What the samples still cannot show.** The loopback filter,
 which engages on one branch of the gate — `Development`, no token, no policy, no
 `AllowUnauthenticated` — and needs a host bound off loopback with the token blanked, which is not a
 state these samples can be in. Design plan §13.3 documents the branch and the 403 it answers with.

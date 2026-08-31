@@ -142,3 +142,84 @@ public sealed record ApiTokenRequest(string? Name, string? Scope, DateTimeOffset
 /// <c>token</c>; a token's name is its audit identity rather than a person's.
 /// </summary>
 public sealed record AuthMeResponse(string Kind, string? Name, string? Subject, string? Scope);
+
+/// <summary>
+/// A schedule edit, carrying the version the editor loaded. Sent to the operator tree only: the
+/// machine-callable surface has no schedule write.
+/// </summary>
+/// <param name="CronExpression">Cron expression, 5- or 6-field.</param>
+/// <param name="TimeZoneId">IANA timezone id the expression is evaluated in.</param>
+/// <param name="Enabled">Whether the scheduler should act on this schedule.</param>
+/// <param name="Overlap">Overrides the job's declared overlap policy when set.</param>
+/// <param name="MaxDuration">Overrides the job's declared maximum duration when set.</param>
+/// <param name="Settings">
+/// Arbitrary per-job settings. Absent — omitted, or null — preserves whatever is stored, because
+/// absent means "I did not supply this" rather than "make it empty"; an empty object clears them;
+/// entries replace them wholesale, so a caller editing one key sends them all. This is the one
+/// field the write does not replace outright.
+/// </param>
+/// <param name="Version">
+/// The version the editor loaded, for optimistic concurrency. <c>0</c> asks to overwrite whatever
+/// is stored, which is what a first write has and what the storage tier reads as "I did not load
+/// this row". Omitting it is refused with 409 where a row already exists, so that forgetting the
+/// field cannot silently become last-write-wins.
+/// </param>
+public sealed record ScheduleWriteRequest(
+    string CronExpression,
+    string TimeZoneId,
+    bool Enabled,
+    string? Overlap,
+    TimeSpan? MaxDuration,
+    IReadOnlyDictionary<string, string>? Settings,
+    int? Version);
+
+/// <summary>
+/// A schedule as the editor loads and reloads it: the stored row, or — where no row exists yet —
+/// what the job declares in code, at version zero.
+/// </summary>
+/// <param name="JobName">The job this configuration belongs to.</param>
+/// <param name="CronExpression">Cron expression, empty for a job that declares none.</param>
+/// <param name="TimeZoneId">The zone the expression is evaluated in, as the host resolved it.</param>
+/// <param name="Enabled">Whether the scheduler acts on this schedule.</param>
+/// <param name="Overlap">The overlap override, or null when the job's own declaration stands.</param>
+/// <param name="MaxDuration">The duration override, or null when the job's own declaration stands.</param>
+/// <param name="Settings">Arbitrary per-job settings.</param>
+/// <param name="Version">The version now stored, which the next edit has to send back.</param>
+public sealed record ScheduleResponse(
+    string JobName,
+    string CronExpression,
+    string TimeZoneId,
+    bool Enabled,
+    string? Overlap,
+    TimeSpan? MaxDuration,
+    IReadOnlyDictionary<string, string> Settings,
+    int Version);
+
+/// <summary>
+/// The instances registered against the shared store, and how stale is stale.
+/// </summary>
+/// <remarks>
+/// Every recorded instance, including ones whose heartbeat has lapsed: a view that drops the dead
+/// instance hides exactly what the reader opened it to see. <paramref name="HeartbeatTimeout"/> is
+/// the janitor's own, so a dashboard marking staleness draws the line where the reaper does.
+/// </remarks>
+/// <param name="Instances">One entry per registered process, in the store's order.</param>
+/// <param name="HeartbeatTimeout">How stale a heartbeat may be before the instance counts as gone.</param>
+public sealed record InstancesResponse(
+    IReadOnlyList<InstanceResponse> Instances,
+    TimeSpan HeartbeatTimeout);
+
+/// <summary>One registered process.</summary>
+/// <param name="InstanceId">The instance's stable id, as it appears on a run.</param>
+/// <param name="MachineName">The host the process is running on.</param>
+/// <param name="ProcessId">The operating system process id.</param>
+/// <param name="AssemblyVersion">The entry assembly's informational version, where one was read.</param>
+/// <param name="StartedAtUtc">When the process registered itself.</param>
+/// <param name="LastHeartbeatUtc">When it last confirmed it was alive.</param>
+public sealed record InstanceResponse(
+    string InstanceId,
+    string MachineName,
+    int ProcessId,
+    string? AssemblyVersion,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset LastHeartbeatUtc);

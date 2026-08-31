@@ -51,22 +51,6 @@ public sealed class JobEndpointTests
     }
 
     [Fact]
-    public async Task ANonDefaultBasePathMovesTheRoutes()
-    {
-        await using var host = await ApiTestHost.StartAsync(api =>
-        {
-            api.Tokens.Add(Token);
-            api.BasePath = "/ops/cadence";
-        });
-
-        var moved = await host.Client.SendAsync(Get("/ops/cadence/api/jobs"));
-        var original = await host.Client.SendAsync(Get("/cadence/api/jobs"));
-
-        moved.EnsureSuccessStatusCode();
-        Assert.Equal(HttpStatusCode.NotFound, original.StatusCode);
-    }
-
-    [Fact]
     public async Task WithoutATokenTheRoutesAreUnauthorizedNotMissing()
     {
         await using var host = await StartAsync();

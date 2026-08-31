@@ -33,10 +33,9 @@ internal static class TokenEndpoints
 
         if (requireUserPrincipal)
         {
-            // Administration is a human act: every route here requires a user principal, not merely
-            // one that isn't a token, so an anonymous caller (AllowUnauthenticated, no principal at
-            // all) is refused the same way. One filter, so the rule cannot drift between handlers.
-            tokens.AddEndpointFilter(RequireUserAsync)
+            // Administration is a human act, and the schedule write is another: both draw the line
+            // with the same filter.
+            tokens.AddEndpointFilter<UserPrincipalFilter>()
                 .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(void)));
         }
 
@@ -51,12 +50,6 @@ internal static class TokenEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
-
-    private static async ValueTask<object?> RequireUserAsync(
-        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-        => context.HttpContext.User.FindFirst(CadenceTokenDefaults.KindClaim)?.Value == CadencePrincipal.UserKind
-            ? await next(context)
-            : TypedResults.StatusCode(StatusCodes.Status403Forbidden);
 
     private static async Task<Results<JsonHttpResult<ApiTokenCreatedResponse>, JsonHttpResult<ProblemDetails>>> CreateAsync(
         ApiTokenRequest request,
@@ -77,7 +70,7 @@ internal static class TokenEndpoints
             context.Response.Headers.WWWAuthenticate = CadenceApiDefaults.CookieScheme;
 
             return ProblemMapper.AsResult(ProblemMapper.StaleSession(
-                oidc.TokenCreationMaxAge, AuthEndpoints.FreshLoginPath(options.Value.ApiPath)));
+                oidc.TokenCreationMaxAge, AuthEndpoints.FreshLoginPath(CadenceApiDefaults.ApiPath)));
         }
 
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > MaxNameLength)

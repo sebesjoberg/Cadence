@@ -3,6 +3,18 @@ namespace Cadence.Api;
 /// <summary>Names a host needs in order to compose its own policy over the control surface.</summary>
 public static class CadenceApiDefaults
 {
+    /// <summary>The prefix every Cadence route sits under. Fixed, so the SPA bundle can bake it.</summary>
+    public const string BasePath = "/cadence";
+
+    /// <summary>The machine-callable tree, and the sign-in routes.</summary>
+    public const string ApiPath = BasePath + "/api";
+
+    /// <summary>The operator tree the dashboard calls.</summary>
+    public const string UiPath = BasePath + "/ui";
+
+    /// <summary>Hashed bundle assets.</summary>
+    public const string AssetsPath = BasePath + "/assets";
+
     /// <summary>
     /// The authentication scheme the token handler registers under. A host writing its own policy
     /// must list this scheme, because Cadence deliberately makes it no host's default.

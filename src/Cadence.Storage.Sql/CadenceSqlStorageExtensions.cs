@@ -133,6 +133,10 @@ public static class CadenceSqlStorageExtensions
 
         services.AddHostedService(sp => sp.GetRequiredService<SqlInstanceRegistry>());
 
+        // Plain AddSingleton, not TryAdd: AddCadence offers InMemoryInstanceDirectory with TryAdd
+        // after the configuration callback has run, so this registration wins.
+        services.AddSingleton<IInstanceDirectory, SqlInstanceDirectory>();
+
         // The janitor itself lives in Core: reap before purge, batch, never escalate a failure into
         // a scheduling problem is policy no storage tier should be restating. What the SQL tier
         // supplies is the five operations and the three numbers they need.

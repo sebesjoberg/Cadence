@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <RootNamespace>Cadence.Dashboard</RootNamespace>
+    <Description>Operator dashboard for Cadence: an embedded SPA over the schedule, run history, pause, token and cluster endpoints.</Description>
+    <!-- The SPA's dependency tree is npm's; globbing it as None costs seconds and buys nothing. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);ui/node_modules/**</DefaultItemExcludes>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cadence.Api\Cadence.Api.csproj" />
+  </ItemGroup>
+
+  <!--
+    The SPA bundle is a build output, not a checked-in artifact, so `dotnet build` has to produce
+    it. Node is therefore a build requirement of this project alone.
+
+    Four targets rather than one, each incremental on its own inputs, so an unchanged rebuild
+    starts no external process at all: the Node probe shares the bundle's up-to-date check, which
+    means a contributor with no Node can still rebuild a tree whose bundle is current.
+  -->
+  <ItemGroup>
+    <SpaSource Include="ui/src/**/*" Exclude="ui/src/**/*.test.*" />
+    <SpaSource Include="ui/index.html;ui/vite.config.ts;ui/tsconfig.json;ui/package.json" />
+  </ItemGroup>
+
+  <Target Name="CadenceRequireNode"
+          Inputs="@(SpaSource);ui/package-lock.json"
+          Outputs="wwwroot/.build-stamp">
+    <Exec Command="node --version"
+          ContinueOnError="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="CadenceNodeExitCode" />
+    </Exec>
+    <Error Condition="'$(CadenceNodeExitCode)' != '0'"
+           Text="Cadence.Dashboard needs Node.js to build its UI bundle. Install Node 22 or later (https://nodejs.org), then rebuild. The bundle is not committed, so there is no prebuilt copy to fall back on." />
+  </Target>
+
+  <!-- npm ci writes node_modules/.package-lock.json, which is the natural stamp for this. -->
+  <Target Name="CadenceInstallSpaPackages"
+          DependsOnTargets="CadenceRequireNode"
+          Inputs="ui/package-lock.json"
+          Outputs="ui/node_modules/.package-lock.json">
+    <Exec Command="npm ci" WorkingDirectory="ui" />
+  </Target>
+
+  <Target Name="CadenceBuildSpa"
+          DependsOnTargets="CadenceInstallSpaPackages"
+          Inputs="@(SpaSource);ui/package-lock.json"
+          Outputs="wwwroot/.build-stamp">
+    <Exec Command="npm run build" WorkingDirectory="ui" />
+    <Touch Files="wwwroot/.build-stamp" AlwaysCreate="true" />
+  </Target>
+
+  <!--
+    The glob runs here rather than in a static ItemGroup because on a clean tree wwwroot does not
+    exist at evaluation time, and an item group evaluated then would embed nothing on the very
+    build that produces the files.
+  -->
+  <Target Name="CadenceEmbedSpa" BeforeTargets="BeforeBuild" DependsOnTargets="CadenceBuildSpa">
+    <ItemGroup>
+      <EmbeddedResource Include="wwwroot/**/*" Exclude="wwwroot/.build-stamp" />
+    </ItemGroup>
+  </Target>
+
+</Project>

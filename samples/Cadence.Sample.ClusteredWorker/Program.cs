@@ -1,5 +1,6 @@
 using Cadence;
 using Cadence.Api;
+using Cadence.Dashboard;
 using Cadence.Diagnostics;
 using Cadence.Sample.ClusteredWorker;
 using Cadence.Storage.Redis;
@@ -52,7 +53,7 @@ builder.Services.AddCadence(cadence =>
             options.InstanceId = instanceId;
             options.MaxConcurrentRuns = 4;
         })
-        .AddApi(api =>
+        .AddDashboard(api =>
         {
             // The realm role, as samples/keycloak/cadence-realm.json's protocol mapper writes it
             // into the ID token. Left unset, MapCadenceApi warns that any user Keycloak
@@ -62,6 +63,9 @@ builder.Services.AddCadence(cadence =>
 
             // Keycloak in start-dev serves plain HTTP and no HTTPS. A deployment leaves this alone.
             api.Oidc.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+            // Two AppHosts, one shared project: without this, both dashboards would say "Cadence".
+            api.Dashboard.Title = $"Cadence sample ({tier})";
         });
 
     if (redisConnectionString is not null)
@@ -135,6 +139,7 @@ if (app.Environment.IsDevelopment())
 // AppHost that is Keycloak; running this project on its own it is the token in
 // appsettings.Development.json.
 app.MapCadenceApi();
+app.MapCadenceDashboard();
 app.MapCadenceHealth();
 
 app.Logger.ReplicaStarting(instanceId, tier);

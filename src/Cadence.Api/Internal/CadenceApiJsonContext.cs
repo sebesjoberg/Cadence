@@ -27,4 +27,8 @@ namespace Cadence.Api.Internal;
 [JsonSerializable(typeof(ApiTokenCreatedResponse))]
 [JsonSerializable(typeof(ApiTokenRequest))]
 [JsonSerializable(typeof(AuthMeResponse))]
+[JsonSerializable(typeof(ScheduleWriteRequest))]
+[JsonSerializable(typeof(ScheduleResponse))]
+[JsonSerializable(typeof(InstanceResponse))]
+[JsonSerializable(typeof(InstancesResponse))]
 internal sealed partial class CadenceApiJsonContext : JsonSerializerContext;

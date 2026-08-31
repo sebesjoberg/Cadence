@@ -1,0 +1,161 @@
+import { Badge, Code, Table, Text, UnstyledButton } from '@mantine/core'
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table'
+import type { SortingState } from '@tanstack/react-table'
+import { useState } from 'react'
+import { statusColor } from '../api/status'
+import type { JobSummaryResponse } from '../api/types'
+import { JobRowActions } from './JobRowActions'
+
+const ARROWS: Record<string, string> = { asc: ' ▲', desc: ' ▼' }
+
+function formatInstant(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : '—'
+}
+
+const columnHelper = createColumnHelper<JobSummaryResponse>()
+
+const columns = [
+  columnHelper.accessor('name', {
+    header: 'Job',
+    cell: (info) => <Text fw={500}>{info.getValue()}</Text>,
+  }),
+  columnHelper.accessor('cron', {
+    header: 'Cron',
+    enableSorting: false,
+    cell: (info) =>
+      info.getValue() ? (
+        <Code>{info.getValue()}</Code>
+      ) : (
+        <Text c="dimmed" size="sm">
+          Trigger only
+        </Text>
+      ),
+  }),
+  columnHelper.accessor('timeZone', {
+    header: 'Timezone',
+    enableSorting: false,
+    cell: (info) => info.getValue() ?? '—',
+  }),
+  columnHelper.accessor('enabled', {
+    header: 'Enabled',
+    enableSorting: false,
+    cell: (info) => (
+      <Badge variant="light" color={info.getValue() ? 'green' : 'gray'}>
+        {info.getValue() ? 'Enabled' : 'Paused'}
+      </Badge>
+    ),
+  }),
+  columnHelper.accessor('nextOccurrenceUtc', {
+    header: 'Next occurrence',
+    cell: (info) => formatInstant(info.getValue()),
+  }),
+  columnHelper.accessor((row) => row.lastRun?.status ?? '', {
+    id: 'lastRunStatus',
+    header: 'Last run',
+    cell: (info) =>
+      info.getValue() ? (
+        <Badge variant="light" color={statusColor(info.getValue())}>
+          {info.getValue()}
+        </Badge>
+      ) : (
+        <Text c="dimmed" size="sm">
+          Never run
+        </Text>
+      ),
+  }),
+  columnHelper.accessor((row) => row.lastRun?.startedAtUtc ?? null, {
+    id: 'lastRunAt',
+    header: 'Last run at',
+    enableSorting: false,
+    cell: (info) => formatInstant(info.getValue()),
+  }),
+  columnHelper.display({
+    id: 'actions',
+    header: '',
+    cell: (info) => <JobRowActions job={info.row.original} />,
+  }),
+]
+
+interface JobsTableProps {
+  jobs: JobSummaryResponse[]
+  onSelectJob: (name: string) => void
+}
+
+/** Every registered job, as the overview shows it. A row opens that job; the actions stay here. */
+export function JobsTable({ jobs, onSelectJob }: JobsTableProps) {
+  const [sorting, setSorting] = useState<SortingState>([])
+
+  // TanStack Table is the plan's table for this list; useReactTable's return is not meant to be
+  // memoized by callers, which is what this rule otherwise guards against.
+  // oxlint-disable-next-line react/incompatible-library
+  const table = useReactTable({
+    data: jobs,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) => row.name,
+  })
+
+  return (
+    <Table.ScrollContainer minWidth={900}>
+      <Table striped highlightOnHover verticalSpacing="sm">
+        <Table.Thead>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <Table.Tr key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <Table.Th key={header.id}>
+                  {header.column.getCanSort() ? (
+                    <UnstyledButton
+                      fz="sm"
+                      fw={700}
+                      onClick={header.column.getToggleSortingHandler()}
+                    >
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                      {ARROWS[header.column.getIsSorted() || ''] ?? ''}
+                    </UnstyledButton>
+                  ) : (
+                    flexRender(header.column.columnDef.header, header.getContext())
+                  )}
+                </Table.Th>
+              ))}
+            </Table.Tr>
+          ))}
+        </Table.Thead>
+
+        <Table.Tbody>
+          {table.getRowModel().rows.length === 0 ? (
+            <Table.Tr>
+              <Table.Td colSpan={columns.length}>
+                <Text c="dimmed" size="sm">
+                  This instance has no registered jobs.
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          ) : (
+            table.getRowModel().rows.map((row) => (
+              <Table.Tr
+                key={row.id}
+                onClick={() => onSelectJob(row.original.name)}
+                style={{ cursor: 'pointer' }}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <Table.Td key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </Table.Td>
+                ))}
+              </Table.Tr>
+            ))
+          )}
+        </Table.Tbody>
+      </Table>
+    </Table.ScrollContainer>
+  )
+}

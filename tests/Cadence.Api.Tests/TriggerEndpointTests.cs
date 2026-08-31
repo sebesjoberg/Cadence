@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Cadence.Execution;
 using Cadence.Storage;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -67,6 +68,25 @@ public sealed class TriggerEndpointTests
         var response = await host.Client.SendAsync(Post("/cadence/api/jobs/nightly/trigger"));
 
         Assert.Equal(expected, response.StatusCode);
+    }
+
+    // §13.6: the trigger runs in the process that received it, so a replica that registers no jobs
+    // 404s every name. The count is what tells an operator that from the response body, instead of
+    // leaving them to conclude the job was deleted.
+    [Fact]
+    public async Task AnUnregisteredJobIsNotFoundAndTheDetailSaysHowManyThereAre()
+    {
+        var trigger = new FakeTrigger { Throws = new JobNotFoundException("nightly") };
+        await using var host = await StartAsync(trigger);
+
+        var response = await host.Client.SendAsync(Post("/cadence/api/jobs/nightly/trigger"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>();
+
+        Assert.NotNull(problem);
+        Assert.Contains("registered job(s)", problem.Detail!, StringComparison.Ordinal);
     }
 
     [Fact]

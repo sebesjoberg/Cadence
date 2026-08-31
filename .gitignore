@@ -72,3 +72,10 @@ desktop.ini
 docs/scratch/
 docs/superpowers/
 .superpowers/
+
+## Dashboard SPA — the bundle is a build output, and its dependency tree is npm's business
+src/Cadence.Dashboard/wwwroot/
+src/Cadence.Dashboard/ui/node_modules/
+
+# Vitest's JUnit report, written in CI so the run publishes a check alongside the .NET one.
+src/Cadence.Dashboard/ui/test-results/

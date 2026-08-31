@@ -118,6 +118,39 @@ public sealed class SqlServerFixture : IAsyncLifetime
         return migrator.MigrateAsync(default);
     }
 
+    /// <summary>
+    /// Inserts a row into <c>CadenceInstance</c> directly, so a test controls heartbeats itself
+    /// rather than waiting on <see cref="SqlInstanceRegistry"/>'s background loop.
+    /// </summary>
+    /// <param name="options">The database and schema to write into.</param>
+    /// <param name="instance">The row's values.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    public static async Task WriteInstanceAsync(
+        SqlStorageOptions options,
+        InstanceInfo instance,
+        CancellationToken cancellationToken)
+    {
+        var database = new SqlDatabase(options);
+
+        await database.ExecuteAsync(
+            $"""
+            INSERT INTO {database.Table("CadenceInstance")}
+                (InstanceId, MachineName, ProcessId, AssemblyVersion, StartedAtUtc, LastHeartbeatUtc)
+            VALUES
+                (@InstanceId, @MachineName, @ProcessId, @AssemblyVersion, @StartedAtUtc, @LastHeartbeatUtc);
+            """,
+            command =>
+            {
+                SqlValues.AddText(command, "@InstanceId", instance.InstanceId, 200);
+                SqlValues.AddText(command, "@MachineName", instance.MachineName, 200);
+                command.Parameters.AddWithValue("@ProcessId", instance.ProcessId);
+                SqlValues.AddText(command, "@AssemblyVersion", instance.AssemblyVersion, 50);
+                SqlValues.AddInstant(command, "@StartedAtUtc", instance.StartedAtUtc);
+                SqlValues.AddInstant(command, "@LastHeartbeatUtc", instance.LastHeartbeatUtc);
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
     private static string Sanitise(string label)
         => new([.. label.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)]);
 }

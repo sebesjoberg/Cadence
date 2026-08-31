@@ -1,4 +1,5 @@
 using Cadence.Execution;
+using Cadence.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -20,11 +21,16 @@ internal static class ProblemMapper
 
     /// <summary>Describes a refusal that arrived as an exception, or null when it is not one of ours.</summary>
     /// <param name="exception">The exception to describe.</param>
-    public static ProblemDetails? Describe(Exception exception) => exception switch
+    /// <param name="registered">
+    /// How many jobs this replica has, where the caller knows it. The trigger does, and its 404 is
+    /// the one §13.6 wants the count on.
+    /// </param>
+    public static ProblemDetails? Describe(Exception exception, int? registered = null) => exception switch
     {
-        JobNotFoundException ex => JobNotFound(ex.JobName),
+        JobNotFoundException ex => JobNotFound(ex.JobName, registered),
         TriggerNotAllowedException ex => Problem(400, "trigger-not-allowed", "Trigger not allowed", ex.Message),
         SchedulerPausedException ex => Problem(409, "scheduler-paused", "Triggers are paused", ex.Message),
+        ScheduleConflictException ex => ScheduleConflict(ex.JobName),
         _ => null,
     };
 
@@ -42,11 +48,20 @@ internal static class ProblemMapper
 
     /// <summary>Describes a name that matches no registered job.</summary>
     /// <param name="jobName">The name that was not found.</param>
-    public static ProblemDetails JobNotFound(string jobName) => Problem(
+    /// <param name="registered">
+    /// How many jobs this replica has, where the caller knows. §13.6: a replica that serves the
+    /// dashboard and registers no jobs answers 404 to every name, and a count of zero is what says
+    /// so from the response body rather than from somebody's deployment diagram.
+    /// </param>
+    public static ProblemDetails JobNotFound(string jobName, int? registered = null) => Problem(
         404,
         "job-not-found",
         "Job not found",
-        $"No job is registered under the name '{jobName}'.");
+        $"No job is registered under the name '{jobName}'."
+        + (registered is { } count
+            ? $" This replica has {count} registered job(s); a replica that hosts only the " +
+              "dashboard has none."
+            : string.Empty));
 
     /// <summary>Describes a pause scope that names no combination of the defined flags.</summary>
     /// <param name="scope">The scope as the caller wrote it.</param>
@@ -121,6 +136,68 @@ internal static class ProblemMapper
         "Sign-in too old",
         "Creating an API token requires having authenticated with the identity provider within the " +
         $"last {maxAge}. Re-authenticate at {loginPath} and retry.");
+
+    /// <summary>Describes a cron expression the parser refused.</summary>
+    /// <param name="expression">The expression as the caller wrote it.</param>
+    public static ProblemDetails InvalidCron(string? expression) => Problem(
+        400,
+        "invalid-cron",
+        "Invalid cron expression",
+        $"cronExpression: '{Echo(expression)}' is not a cron expression. It needs 5 fields, or 6 " +
+        "to include seconds.");
+
+    /// <summary>Describes a timezone id this host resolves to nothing.</summary>
+    /// <param name="id">The id as the caller wrote it.</param>
+    public static ProblemDetails UnknownTimeZone(string? id) => Problem(
+        400,
+        "unknown-time-zone",
+        "Unknown timezone",
+        $"timeZoneId: '{Echo(id)}' is not a timezone on this host. Use an IANA id such as " +
+        "'Europe/Stockholm'. A container image with InvariantGlobalization enabled resolves none " +
+        "of them.");
+
+    /// <summary>Describes an overlap policy that names no defined member.</summary>
+    /// <param name="overlap">The policy as the caller wrote it.</param>
+    public static ProblemDetails InvalidOverlapPolicy(string? overlap) => Problem(
+        400,
+        "invalid-overlap-policy",
+        "Unknown overlap policy",
+        $"overlap: '{Echo(overlap)}' is not an overlap policy. Use Skip or AllowConcurrent.");
+
+    /// <summary>
+    /// Describes a maximum duration that is not positive — the rule <c>[ScheduledJob]</c> and
+    /// <c>JobBuilder.MaxDuration</c> enforce at startup, on the third way into a schedule. Zero
+    /// cancels every run the instant it begins, and a negative value throws inside the executor.
+    /// </summary>
+    /// <param name="maxDuration">The duration as the caller wrote it.</param>
+    public static ProblemDetails InvalidMaxDuration(TimeSpan maxDuration) => Problem(
+        400,
+        "invalid-max-duration",
+        "Invalid maximum duration",
+        $"maxDuration: {maxDuration} is not positive. Omit it for no limit, or use a form like " +
+        "'00:10:00'.");
+
+    /// <summary>Describes a schedule write that lost its optimistic-concurrency check.</summary>
+    /// <param name="jobName">The job whose schedule could not be written.</param>
+    public static ProblemDetails ScheduleConflict(string jobName) => Problem(
+        409,
+        "schedule-conflict",
+        "Schedule was modified",
+        $"The schedule for '{Echo(jobName)}' moved since the editor loaded it. Reload it and " +
+        "reapply the change.");
+
+    /// <summary>
+    /// Describes a write over an existing row that sent no version. Refused rather than defaulted:
+    /// the storage tier reads version zero as "just make it so", so accepting the omission would
+    /// make forgetting the field indistinguishable from asking for last-write-wins.
+    /// </summary>
+    /// <param name="jobName">The job whose schedule was being written.</param>
+    public static ProblemDetails MissingScheduleVersion(string jobName) => Problem(
+        409,
+        "schedule-conflict",
+        "Schedule version required",
+        $"A schedule for '{Echo(jobName)}' is already stored, so the write must carry the version " +
+        "it was loaded at. Send that version, or send 0 to overwrite whatever is there.");
 
     /// <summary>Describes a token id that matches nothing revocable.</summary>
     /// <param name="id">The id that matched nothing.</param>

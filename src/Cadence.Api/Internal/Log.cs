@@ -87,6 +87,19 @@ internal static partial class Log
                   "authentication, so the configuration says one thing.")]
     public static partial void AuthenticationDisabledButIgnored(this ILogger logger, string basePath);
 
+    // Schedule edits are audited to the log alone; an audit table is parked.
+    [LoggerMessage(
+        EventId = 3007,
+        Level = LogLevel.Information,
+        Message = "Cadence's schedule for '{JobName}' was changed by {ChangedBy}: the cron " +
+                  "expression was '{OldCronExpression}' and is now '{NewCronExpression}'.")]
+    public static partial void ScheduleChanged(
+        this ILogger logger,
+        string jobName,
+        string changedBy,
+        string oldCronExpression,
+        string newCronExpression);
+
     // 3100-3199: identity.
 
     [LoggerMessage(

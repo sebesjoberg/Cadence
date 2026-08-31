@@ -1,5 +1,7 @@
 # Cadence
 
+[![CI](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+
 A job scheduler for .NET where **schedules live in a database and are editable at
 runtime**. Jobs are plain classes resolved from DI, one fresh scope per run, and
 multiple app instances coordinate so no scheduled slot runs twice.
@@ -223,15 +225,15 @@ Four environment variables cover it:
 | `CADENCE_OIDC_CLIENT_ID` | the client Cadence authenticates as |
 | `CADENCE_OIDC_CLIENT_SECRET` | its secret, for a confidential client |
 
-**Signing in** is `GET {BasePath}/api/auth/login`, which redirects to the provider and comes back
-holding a `cadence.session` cookie; `POST {BasePath}/api/auth/logout` clears it and, where the
+**Signing in** is `GET /cadence/api/auth/login`, which redirects to the provider and comes back
+holding a `cadence.session` cookie; `POST /cadence/api/auth/logout` clears it and, where the
 provider advertises an end-session endpoint, signs out there too. A signed-in user always carries
 `operate` scope — the surface has no finer grain for a person than it does for a token — and leaving
 `RequiredClaimType` unset admits every user the provider authenticates, which `MapCadenceApi()` warns
 about at every start.
 
-**A signed-in user can mint API tokens at `POST {BasePath}/api/tokens`, scoped `read` or `operate`,
-and revoke them at `DELETE {BasePath}/api/tokens/{id}`.** Four rules worth knowing before relying on
+**A signed-in user can mint API tokens at `POST /cadence/api/tokens`, scoped `read` or `operate`,
+and revoke them at `DELETE /cadence/api/tokens/{id}`.** Four rules worth knowing before relying on
 any of it:
 
 - **A token cannot mint another token.** Every route under `/tokens` requires a signed-in user
@@ -256,7 +258,7 @@ Minting a token requires a *recently* signed-in user — `TokenCreationMaxAge`, 
 default — checked against when the provider says the user authenticated (`auth_time`), not when the
 ticket was issued or when it expires. A stale ticket answers 401 with
 `WWW-Authenticate: CadenceCookie`, because the fix is one redirect back through the provider, not a
-permissions problem. The refusal names the redirect: `{BasePath}/api/auth/login?prompt=login` asks
+permissions problem. The refusal names the redirect: `/cadence/api/auth/login?prompt=login` asks
 the provider to authenticate the user again, which is what actually moves `auth_time` — a plain
 sign-in is answered by the provider's live session and comes back just as stale.
 
@@ -274,6 +276,50 @@ browser that called it; an operator cannot terminate someone else's session remo
 user at the provider takes effect within one cookie lifetime — `CookieLifetime`, 8 hours by
 default — rather than immediately, because the ticket is never extended by use and nothing here
 tracks which tickets are still live.
+
+## The operator dashboard
+
+```csharp
+builder.Services.AddCadence(cadence => cadence
+    .UseSqlStorage(connectionString)
+    .AddDashboard(api => api.Dashboard.Title = "Cadence — production"));
+
+app.MapCadenceDashboard();
+```
+
+`AddDashboard()` calls `AddApi()` for you — one options object still governs both trees (see
+[The control surface](#the-control-surface)), so a host that wants the machine-callable API as well
+just calls `MapCadenceApi()` too. `MapCadenceDashboard()` embeds a prebuilt React SPA and mounts it,
+together with the endpoints it calls, at paths fixed under `/cadence`: the bundle ships inside the
+NuGet package, so there is no build step in the consuming application left to bake a configured
+prefix into. `CadenceDashboardOptions.Title` is what tells two open tabs apart.
+
+The dashboard shows job and run history, lets an operator pause the cluster, mint and revoke API
+tokens, trigger a job by hand — recorded as `Manual`, distinct from a token's `Api` — and edit a
+job's cron, timezone, enabled flag, overlap policy and maximum duration.
+
+Editing a schedule and triggering by hand both require a signed-in user principal, not the `operate`
+scope a token can hold: only a person changes when work happens, and `Manual` in the history has to
+mean a person clicked — a token still has `POST /cadence/api/jobs/{name}/trigger`, which records
+`Api`. The exception is the one token administration has: a policy you named with
+`RequireAuthorization` governs alone, and under it whatever that policy admits may do both. Two
+things the dashboard does not do:
+
+- **A job's `Settings` are displayed and round-tripped verbatim, never edited.** The form shows
+  them and carries them through unchanged on every save; writing them needs the store directly.
+- **A schedule edit is audited to the log only**, as who changed which job's cron and to what — no
+  audit table exists. [Design plan](docs/design-plan.md) §14.5 records the one that would.
+
+Both trees log through source-generated `LoggerMessage`s with a fixed event id per message:
+`Cadence.Api`'s run 3000–3007 and 3100–3102, `Cadence.Dashboard`'s start at 3200 — grepping logs
+across both assemblies for an event id never lands you in the wrong one.
+
+**The gate is the API's, one row narrower.** `MapCadenceApi()` maps for a bearer token alone;
+`MapCadenceDashboard()` does not, because no browser presents one — configure `CadenceApiOptions.Oidc`
+so a person can sign in, or name an authorization policy, or set `AllowUnauthenticated` for a
+deployment a proxy already authenticates. A token-only configuration makes `MapCadenceDashboard()`
+throw at startup rather than ship a UI nobody could sign into. In `Development` with nothing
+configured, it maps anyway, loopback callers only, exactly like the API.
 
 ## Choosing a storage tier
 
@@ -350,8 +396,15 @@ with both tiers held to one conformance suite that runs against a real server in
 Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
 control surface, is complete: the machine-callable API, its token auth gate and the health checks
 described above, alongside distributed pause. v0.3.1, identity, is complete too: OIDC sign-in, API
-tokens with scopes on both storage tiers, and the Data Protection key ring described above. The
-dashboard is next, in v0.4. Not yet published to NuGet.
+tokens with scopes on both storage tiers, and the Data Protection key ring described above. v0.4,
+the operator dashboard, is complete too: `AddDashboard()` and `MapCadenceDashboard()`, described in
+[The operator dashboard](#the-operator-dashboard), and both Aspire samples map it alongside the API.
+Not yet published to NuGet.
+
+Every push and pull request runs two suites, each publishing its own check: **tests** covers the
+.NET solution — including the storage conformance suites, which start a real SQL Server and Redis
+against the runner's Docker socket rather than skipping — and **frontend tests** covers the
+dashboard's TypeScript. The badge above is green only when both are.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 
