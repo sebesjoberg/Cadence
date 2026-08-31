@@ -1,6 +1,8 @@
 # Cadence
 
 [![CI](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ftests.json)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+[![frontend](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ffrontend.json)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
 
 A job scheduler for .NET where **schedules live in a database and are editable at
 runtime**. Jobs are plain classes resolved from DI, one fresh scope per run, and
@@ -401,8 +403,10 @@ its 409, the pause switches' scope arithmetic across all four combinations, and 
 of a newly minted token.
 
 Every push and pull request runs both suites, each publishing its own check — **tests** and
-**frontend tests** — alongside a per-suite table of totals on the run page. The badge at the top is
-green only when both are.
+**frontend tests** — alongside a per-suite table of totals on the run page. The three badges at the
+top read from that run: the first is the workflow's own pass or fail, and the other two are the
+counts each suite reported on the last push to `main`, republished by CI to a `badges` branch that
+holds nothing else.
 
 ## Samples
 

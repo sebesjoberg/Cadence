@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    outputs:
+      total: ${{ steps.summary.outputs.total }}
+      passed: ${{ steps.summary.outputs.passed }}
+      failed: ${{ steps.summary.outputs.failed }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -61,6 +66,46 @@ jobs:
           name: test-results
           path: artifacts/test-results/*.trx
 
+      # A per-assembly table on the run page, and the totals the badge job reads. The check run
+      # below says pass or fail; this says how much ran, which is what catches a suite that
+      # silently stopped being collected -- a green tick over 40 tests looks like one over 700.
+      - name: Summarise test results
+        id: summary
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        run: |
+          python3 - <<'PY'
+          import glob, os, xml.etree.ElementTree as ET
+
+          ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
+          rows, totals = [], [0, 0, 0, 0]
+
+          for path in sorted(glob.glob('artifacts/test-results/*.trx')):
+              root = ET.parse(path).getroot()
+              counters = root.find(f'{ns}ResultSummary/{ns}Counters')
+              if counters is None:
+                  continue
+
+              unit = root.find(f'{ns}TestDefinitions/{ns}UnitTest')
+              name = os.path.basename(unit.get('storage', path)) if unit is not None else path
+              got = [int(counters.get(k, 0)) for k in ('total', 'passed', 'failed', 'notExecuted')]
+
+              rows.append((name.removesuffix('.dll'), *got))
+              totals = [a + b for a, b in zip(totals, got)]
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              print('## .NET tests', file=out)
+              print(file=out)
+              print('| Suite | Total | Passed | Failed | Skipped |', file=out)
+              print('|---|--:|--:|--:|--:|', file=out)
+              for row in rows:
+                  print('| `{}` | {} | {} | {} | {} |'.format(*row), file=out)
+              print('| **Total** | **{}** | **{}** | **{}** | **{}** |'.format(*totals), file=out)
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              for key, value in zip(('total', 'passed', 'failed', 'skipped'), totals):
+                  print(f'{key}={value}', file=out)
+          PY
+
       # Third party holding checks: write, so pinned by digest. a43b3a5 is v3.0.0.
       - name: Publish test report
         if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
@@ -76,6 +121,11 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    outputs:
+      total: ${{ steps.summary.outputs.total }}
+      passed: ${{ steps.summary.outputs.passed }}
+      failed: ${{ steps.summary.outputs.failed }}
 
     defaults:
       run:
@@ -117,6 +167,39 @@ jobs:
           name: frontend-test-results
           path: src/Cadence.Dashboard/ui/test-results/frontend.xml
 
+      # The same shape as the .NET summary, so one run page reads consistently top to bottom.
+      - name: Summarise test results
+        id: summary
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        run: |
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+
+          root = ET.parse('test-results/frontend.xml').getroot()
+          rows, totals = [], [0, 0, 0, 0]
+
+          for suite in root.findall('testsuite'):
+              got = [int(suite.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped')]
+              total, failures, errors, skipped = got
+              row = (total, total - failures - errors - skipped, failures + errors, skipped)
+
+              rows.append((suite.get('name', '?'), *row))
+              totals = [a + b for a, b in zip(totals, row)]
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
+              print('## Frontend tests', file=out)
+              print(file=out)
+              print('| Suite | Total | Passed | Failed | Skipped |', file=out)
+              print('|---|--:|--:|--:|--:|', file=out)
+              for row in rows:
+                  print('| `{}` | {} | {} | {} | {} |'.format(*row), file=out)
+              print('| **Total** | **{}** | **{}** | **{}** | **{}** |'.format(*totals), file=out)
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              for key, value in zip(('total', 'passed', 'failed', 'skipped'), totals):
+                  print(f'{key}={value}', file=out)
+          PY
+
       # Same pinned digest as the .NET job. Vitest's JUnit output is the shape jest-junit reads.
       - name: Publish test report
         if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
@@ -125,3 +208,61 @@ jobs:
           name: frontend tests
           path: src/Cadence.Dashboard/ui/test-results/frontend.xml
           reporter: jest-junit
+
+  # Publishes the counts the README's badges read. On a push to main only: a pull request must not
+  # move the badge, and a branch's numbers are not what "main is green" means.
+  #
+  # `contents: write` is scoped to this job rather than the workflow, so the two jobs that actually
+  # build and run the code keep read-only tokens. The target is an orphan `badges` branch, force-
+  # pushed to a single commit each time -- it holds two JSON files and no history worth keeping.
+  badges:
+    needs: [build-test, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Write and push the badge endpoints
+        env:
+          DOTNET_TOTAL: ${{ needs.build-test.outputs.total }}
+          DOTNET_PASSED: ${{ needs.build-test.outputs.passed }}
+          DOTNET_FAILED: ${{ needs.build-test.outputs.failed }}
+          FRONTEND_TOTAL: ${{ needs.frontend.outputs.total }}
+          FRONTEND_PASSED: ${{ needs.frontend.outputs.passed }}
+          FRONTEND_FAILED: ${{ needs.frontend.outputs.failed }}
+        run: |
+          mkdir badges && cd badges
+
+          python3 - <<'PY'
+          import json, os
+
+          # Shields' endpoint schema. All-green reads as a count; anything else names the shortfall,
+          # because "656 passed" beside a red workflow would be the more misleading of the two.
+          for label, prefix in (('tests', 'DOTNET'), ('frontend', 'FRONTEND')):
+              total = int(os.environ[f'{prefix}_TOTAL'] or 0)
+              passed = int(os.environ[f'{prefix}_PASSED'] or 0)
+              failed = int(os.environ[f'{prefix}_FAILED'] or 0)
+
+              green = failed == 0 and total > 0
+              badge = {
+                  'schemaVersion': 1,
+                  'label': label,
+                  'message': f'{passed} passed' if green else f'{passed}/{total} passed',
+                  'color': 'brightgreen' if green else 'red',
+              }
+
+              with open(f'{label}.json', 'w', encoding='utf-8') as out:
+                  json.dump(badge, out)
+          PY
+
+          git init -q
+          git checkout -q -b badges
+          git add .
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Test counts for ${GITHUB_SHA:0:7}"
+          git push -q --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" badges
