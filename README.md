@@ -1,8 +1,8 @@
 # Cadence
 
 [![CI](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ftests.json)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
-[![frontend](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ffrontend.json)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ftests.json&cacheSeconds=300)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+[![frontend](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsebesjoberg%2FCadence%2Fbadges%2Ffrontend.json&cacheSeconds=300)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
 
 A job scheduler for .NET where **schedules live in a database and are editable at
 runtime**. Jobs are plain classes resolved from DI, one fresh scope per run, and
