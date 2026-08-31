@@ -1,4 +1,4 @@
-import { Alert, Stack, Text, Title } from '@mantine/core'
+import { Alert, Paper, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { problemMessage } from '../api/message'
@@ -35,10 +35,12 @@ export function Jobs() {
           Loading…
         </Text>
       ) : (
-        <JobsTable
-          jobs={data}
-          onSelectJob={(name) => navigate({ to: '/jobs/$name', params: { name } })}
-        />
+        <Paper withBorder radius="md">
+          <JobsTable
+            jobs={data}
+            onSelectJob={(name) => navigate({ to: '/jobs/$name', params: { name } })}
+          />
+        </Paper>
       )}
     </Stack>
   )

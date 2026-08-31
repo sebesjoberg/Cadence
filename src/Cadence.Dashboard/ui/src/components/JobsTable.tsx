@@ -1,4 +1,4 @@
-import { Badge, Table, Text, UnstyledButton } from '@mantine/core'
+import { Badge, Code, Table, Text, UnstyledButton } from '@mantine/core'
 import {
   createColumnHelper,
   flexRender,
@@ -8,18 +8,9 @@ import {
 } from '@tanstack/react-table'
 import type { SortingState } from '@tanstack/react-table'
 import { useState } from 'react'
+import { statusColor } from '../api/status'
 import type { JobSummaryResponse } from '../api/types'
-
-// Mirrors RunsTable's own map, and local for the same reason: presentation, not domain.
-const STATUS_COLORS: Record<string, string> = {
-  Running: 'blue',
-  Succeeded: 'green',
-  Failed: 'red',
-  TimedOut: 'orange',
-  Aborted: 'gray',
-  Skipped: 'gray',
-  Lost: 'red',
-}
+import { JobRowActions } from './JobRowActions'
 
 const ARROWS: Record<string, string> = { asc: ' ▲', desc: ' ▼' }
 
@@ -30,11 +21,21 @@ function formatInstant(value: string | null): string {
 const columnHelper = createColumnHelper<JobSummaryResponse>()
 
 const columns = [
-  columnHelper.accessor('name', { header: 'Job' }),
+  columnHelper.accessor('name', {
+    header: 'Job',
+    cell: (info) => <Text fw={500}>{info.getValue()}</Text>,
+  }),
   columnHelper.accessor('cron', {
     header: 'Cron',
     enableSorting: false,
-    cell: (info) => info.getValue() ?? 'Trigger only',
+    cell: (info) =>
+      info.getValue() ? (
+        <Code>{info.getValue()}</Code>
+      ) : (
+        <Text c="dimmed" size="sm">
+          Trigger only
+        </Text>
+      ),
   }),
   columnHelper.accessor('timeZone', {
     header: 'Timezone',
@@ -45,8 +46,8 @@ const columns = [
     header: 'Enabled',
     enableSorting: false,
     cell: (info) => (
-      <Badge color={info.getValue() ? 'green' : 'gray'}>
-        {info.getValue() ? 'Enabled' : 'Disabled'}
+      <Badge variant="light" color={info.getValue() ? 'green' : 'gray'}>
+        {info.getValue() ? 'Enabled' : 'Paused'}
       </Badge>
     ),
   }),
@@ -59,9 +60,13 @@ const columns = [
     header: 'Last run',
     cell: (info) =>
       info.getValue() ? (
-        <Badge color={STATUS_COLORS[info.getValue()] ?? 'gray'}>{info.getValue()}</Badge>
+        <Badge variant="light" color={statusColor(info.getValue())}>
+          {info.getValue()}
+        </Badge>
       ) : (
-        'Never run'
+        <Text c="dimmed" size="sm">
+          Never run
+        </Text>
       ),
   }),
   columnHelper.accessor((row) => row.lastRun?.startedAtUtc ?? null, {
@@ -70,6 +75,11 @@ const columns = [
     enableSorting: false,
     cell: (info) => formatInstant(info.getValue()),
   }),
+  columnHelper.display({
+    id: 'actions',
+    header: '',
+    cell: (info) => <JobRowActions job={info.row.original} />,
+  }),
 ]
 
 interface JobsTableProps {
@@ -77,7 +87,7 @@ interface JobsTableProps {
   onSelectJob: (name: string) => void
 }
 
-/** Every registered job, as the overview shows it. A row opens that job. */
+/** Every registered job, as the overview shows it. A row opens that job; the actions stay here. */
 export function JobsTable({ jobs, onSelectJob }: JobsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([])
 
@@ -95,8 +105,8 @@ export function JobsTable({ jobs, onSelectJob }: JobsTableProps) {
   })
 
   return (
-    <Table.ScrollContainer minWidth={800}>
-      <Table striped highlightOnHover>
+    <Table.ScrollContainer minWidth={900}>
+      <Table striped highlightOnHover verticalSpacing="sm">
         <Table.Thead>
           {table.getHeaderGroups().map((headerGroup) => (
             <Table.Tr key={headerGroup.id}>

@@ -43,6 +43,21 @@ describe('/runs search params', () => {
     vi.resetModules()
     server.use(
       http.get('/cadence/ui/runs', () => HttpResponse.json(runsPage())),
+      http.get('/cadence/ui/instances', () =>
+        HttpResponse.json({
+          instances: [
+            {
+              instanceId: 'worker-a',
+              machineName: 'host-a',
+              processId: 1,
+              assemblyVersion: '0.4.0',
+              startedAtUtc: '2026-08-28T09:00:00Z',
+              lastHeartbeatUtc: '2026-08-28T10:00:00Z',
+            },
+          ],
+          heartbeatTimeout: '00:02:00',
+        }),
+      ),
       http.get('/cadence/ui/health/storage', () =>
         HttpResponse.json({ status: 'Healthy', checks: [] }),
       ),

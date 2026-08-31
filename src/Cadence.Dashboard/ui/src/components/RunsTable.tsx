@@ -5,17 +5,8 @@ import {
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
+import { statusColor } from '../api/status'
 import type { RunSummaryResponse } from '../api/types'
-
-const STATUS_COLORS: Record<string, string> = {
-  Running: 'blue',
-  Succeeded: 'green',
-  Failed: 'red',
-  TimedOut: 'orange',
-  Aborted: 'gray',
-  Skipped: 'gray',
-  Lost: 'red',
-}
 
 function formatInstant(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
@@ -27,9 +18,7 @@ const columns = [
   columnHelper.accessor('jobName', { header: 'Job' }),
   columnHelper.accessor('status', {
     header: 'Status',
-    cell: (info) => (
-      <Badge color={STATUS_COLORS[info.getValue()] ?? 'gray'}>{info.getValue()}</Badge>
-    ),
+    cell: (info) => <Badge color={statusColor(info.getValue())}>{info.getValue()}</Badge>,
   }),
   columnHelper.accessor('trigger', { header: 'Trigger' }),
   columnHelper.accessor('instanceId', { header: 'Instance' }),

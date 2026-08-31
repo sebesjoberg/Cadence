@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cadence</title>
     <script>window.__cadence = __CADENCE_BOOT__;</script>
+    <script>
+      // Applies the stored colour scheme before the bundle paints, so a dark-mode operator does
+      // not get a white flash on every load. Mantine owns this key; `auto` defers to the OS.
+      try {
+        var stored = localStorage.getItem('mantine-color-scheme-value') || 'auto';
+        var dark =
+          stored === 'dark' ||
+          (stored === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-mantine-color-scheme', dark ? 'dark' : 'light');
+      } catch (e) {
+        // A browser refusing site data still gets a themed page, just not a remembered one.
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -5,6 +5,8 @@ import { problemMessage } from '../api/message'
 import type { ProblemError } from '../api/problem'
 import type { JobDetailResponse } from '../api/types'
 import { bootstrap } from '../bootstrap'
+import { Crumbs } from '../components/Crumbs'
+import { MachineTrigger } from '../components/MachineTrigger'
 import { RunsTable } from '../components/RunsTable'
 import { ScheduleForm } from '../components/ScheduleForm'
 import { TriggerButton } from '../components/TriggerButton'
@@ -28,6 +30,7 @@ export function JobDetail() {
   if (error) {
     return (
       <Stack gap="xs">
+        <Crumbs parent={{ label: 'Jobs', to: '/' }} current={name} />
         <Title order={3}>{name}</Title>
         <Alert color="red" title="Could not load this job">
           {problemMessage(
@@ -51,6 +54,7 @@ export function JobDetail() {
 
   return (
     <Stack gap="md">
+      <Crumbs parent={{ label: 'Jobs', to: '/' }} current={job.name} />
       <Group justify="space-between" align="flex-start">
         <Stack gap={4}>
           <Title order={3}>{job.name}</Title>
@@ -71,6 +75,8 @@ export function JobDetail() {
           onTriggered={() => queryClient.invalidateQueries({ queryKey: ['jobs'] })}
         />
       </Group>
+
+      <MachineTrigger jobName={job.name} />
 
       <Title order={5}>Schedule</Title>
       <ScheduleForm jobName={name} detail={data} readOnly={!bootstrap.capabilities.scheduleWrite} />

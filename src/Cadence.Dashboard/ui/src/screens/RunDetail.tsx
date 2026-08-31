@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { ProblemError } from '../api/problem'
 import type { RunDetailResponse } from '../api/types'
+import { Crumbs } from '../components/Crumbs'
 import { RunLog } from '../components/RunLog'
 import { runDetailRoute } from '../routes/runs'
 
@@ -30,6 +31,7 @@ export function RunDetail() {
   if (error) {
     return (
       <Stack gap="xs">
+        <Crumbs parent={{ label: 'Runs', to: '/runs' }} current={id} />
         <Title order={3}>Run</Title>
         <Alert color="red" title="Could not load this run">
           {runErrorMessage(error)}
@@ -50,6 +52,7 @@ export function RunDetail() {
 
   return (
     <Stack gap="md">
+      <Crumbs parent={{ label: 'Runs', to: '/runs' }} current={`${run.jobName} · ${id}`} />
       <Title order={3}>{run.jobName}</Title>
 
       <Group gap="xl">
