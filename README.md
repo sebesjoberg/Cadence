@@ -371,6 +371,39 @@ The Redis tier has no equivalent, and no migrator, application lock or reviewabl
 folder either. A key exists once something writes it, which removes the question rather
 than answering it.
 
+## Tests
+
+```bash
+dotnet test Cadence.slnx                        # the scheduler, both storage tiers, the API, the gate
+cd src/Cadence.Dashboard/ui && npm test          # the dashboard's TypeScript
+```
+
+Two suites, because the dashboard is two things.
+
+**The storage tiers are held to one contract, not three.**
+[`Cadence.Storage.Conformance`](tests/Cadence.Storage.Conformance) says what a schedule source, run
+history store, occurrence coordinator, pause store, API token store and instance directory must do.
+SQL Server and Redis subclass all six; the in-memory tier subclasses the four that mean anything
+without infrastructure — it has no claim to race and no second instance to report. A behaviour that
+differs between tiers fails a test rather than surprising you after you switch, which is what makes
+"the store is the only difference" a claim rather than a hope — and why [Choosing a storage
+tier](#choosing-a-storage-tier) can be about operations instead of behaviour.
+
+Those tests start real servers through Testcontainers: with Docker running they exercise a real SQL
+Server and a real Redis, and without it they **skip rather than fail**, so `dotnet test` is still
+green on a machine that has no Docker. A skipped conformance run is not a passing one, though —
+CI has the daemon, so that is where the tiers are actually held to the contract.
+
+**The frontend suite is deliberately not one test per component.** It covers what carries logic
+rather than what renders: the fetch wrapper that holds the whole auth story — both 401 branches,
+the RFC 9457 parse, the session header on every method — the schedule form's version round-trip and
+its 409, the pause switches' scope arithmetic across all four combinations, and the one-time display
+of a newly minted token.
+
+Every push and pull request runs both suites, each publishing its own check — **tests** and
+**frontend tests** — alongside a per-suite table of totals on the run page. The badge at the top is
+green only when both are.
+
 ## Samples
 
 Three things to run under [`samples/`](samples/README.md), all consuming Cadence as packages from a
@@ -400,11 +433,6 @@ tokens with scopes on both storage tiers, and the Data Protection key ring descr
 the operator dashboard, is complete too: `AddDashboard()` and `MapCadenceDashboard()`, described in
 [The operator dashboard](#the-operator-dashboard), and both Aspire samples map it alongside the API.
 Not yet published to NuGet.
-
-Every push and pull request runs two suites, each publishing its own check: **tests** covers the
-.NET solution — including the storage conformance suites, which start a real SQL Server and Redis
-against the runner's Docker socket rather than skipping — and **frontend tests** covers the
-dashboard's TypeScript. The badge above is green only when both are.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 
