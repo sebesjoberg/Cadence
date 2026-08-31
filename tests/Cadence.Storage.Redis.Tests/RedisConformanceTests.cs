@@ -250,3 +250,51 @@ public sealed class RedisApiTokenStoreConformanceTests : ApiTokenStoreConformanc
         }
     }
 }
+
+/// <summary>
+/// Runs the shared result contract against Redis, minus the sweep it does not do and at the size
+/// it will actually carry.
+/// </summary>
+[Collection(RedisCollectionDefinition.Name)]
+public sealed class RedisJobResultStoreConformanceTests : JobResultStoreConformance, IAsyncDisposable
+{
+    private readonly RedisFixture _fixture;
+    private readonly List<RedisConnection> _connections = [];
+    private RedisStorageOptions? _shared;
+
+    public RedisJobResultStoreConformanceTests(RedisFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override bool ExpiresOnItsOwn => true;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A quarter of this tier's default ceiling. Redis holds a result whole in memory on both ends,
+    /// which is the reason that ceiling is an order of magnitude under the SQL tier's — see
+    /// <see cref="RedisStorageOptions.MaxResultBytes"/>.
+    /// </remarks>
+    protected override int LargeResultBytes => 2 * 1024 * 1024;
+
+    /// <inheritdoc />
+    protected override Task<IJobResultStore> CreateAsync()
+    {
+        // One key space shared by every store the test creates, so writes are genuinely visible
+        // across them rather than each getting a private prefix.
+        _shared ??= _fixture.CreateOptions("results");
+
+        var connection = new RedisConnection(_shared);
+        _connections.Add(connection);
+
+        return Task.FromResult<IJobResultStore>(
+            new RedisJobResultStore(connection, new SystemClock(), _shared));
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var connection in _connections)
+        {
+            await connection.DisposeAsync();
+        }
+    }
+}

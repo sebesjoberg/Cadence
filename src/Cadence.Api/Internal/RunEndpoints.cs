@@ -1,4 +1,4 @@
-using Cadence.Storage;
+﻿using Cadence.Storage;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -28,6 +28,12 @@ internal static class RunEndpoints
 
         group.MapGet("/runs/{id:guid}", GetAsync)
             .Produces<RunDetailResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // Under the read policy with everything else on this group. Collecting what a run produced
+        // is a read of history, not an operation -- nothing about downloading a report starts work.
+        group.MapGet("/runs/{id:guid}/result", GetResultAsync)
+            .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
@@ -70,12 +76,41 @@ internal static class RunEndpoints
     private static async Task<Results<JsonHttpResult<RunDetailResponse>, JsonHttpResult<ProblemDetails>>> GetAsync(
         Guid id,
         IRunHistoryStore history,
+        IJobResultStore results,
         CancellationToken cancellationToken)
     {
         var run = await history.GetAsync(id, cancellationToken);
 
-        return run is null
-            ? ProblemMapper.AsResult(ProblemMapper.RunNotFound(id))
-            : TypedResults.Json(Responses.ToDetail(run), CadenceApiJsonContext.Default.RunDetailResponse);
+        if (run is null)
+        {
+            return ProblemMapper.AsResult(ProblemMapper.RunNotFound(id));
+        }
+
+        // Described, never read. A run detail that streamed the bytes would make opening a page as
+        // expensive as downloading everything on it.
+        var result = await results.DescribeAsync(id, cancellationToken);
+
+        return TypedResults.Json(
+            Responses.ToDetail(run, result), CadenceApiJsonContext.Default.RunDetailResponse);
+    }
+
+    private static async Task<IResult> GetResultAsync(
+        Guid id,
+        IRunHistoryStore history,
+        IJobResultStore results,
+        CancellationToken cancellationToken)
+    {
+        // The run is checked first so a mistyped id and an expired result are told apart: one is
+        // "no such run", the other is "that run's bytes have been swept".
+        if (await history.GetAsync(id, cancellationToken) is null)
+        {
+            return ProblemMapper.AsResult(ProblemMapper.RunNotFound(id));
+        }
+
+        var stored = await results.OpenAsync(id, cancellationToken);
+
+        return stored is null
+            ? ProblemMapper.AsResult(ProblemMapper.ResultNotFound(id))
+            : new JobResultDownload(stored);
     }
 }

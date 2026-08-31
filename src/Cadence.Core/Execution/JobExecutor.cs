@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Cadence.Diagnostics;
@@ -18,6 +18,7 @@ public sealed class JobExecutor : IAsyncDisposable
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRunHistoryStore _history;
+    private readonly IJobResultStore _results;
     private readonly IJobProgressSink _progress;
     private readonly ISystemClock _clock;
     private readonly CadenceMetrics _metrics;
@@ -34,6 +35,7 @@ public sealed class JobExecutor : IAsyncDisposable
     /// <summary>Creates the executor.</summary>
     /// <param name="scopeFactory">Creates one DI scope per run.</param>
     /// <param name="history">Where runs are recorded.</param>
+    /// <param name="results">Where the bytes a run produced are kept.</param>
     /// <param name="progress">Sink handed to jobs via <see cref="JobContext.Report"/>.</param>
     /// <param name="clock">The only source of the current time.</param>
     /// <param name="metrics">Instruments to record against.</param>
@@ -42,6 +44,7 @@ public sealed class JobExecutor : IAsyncDisposable
     public JobExecutor(
         IServiceScopeFactory scopeFactory,
         IRunHistoryStore history,
+        IJobResultStore results,
         IJobProgressSink progress,
         ISystemClock clock,
         CadenceMetrics metrics,
@@ -50,6 +53,7 @@ public sealed class JobExecutor : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(results);
         ArgumentNullException.ThrowIfNull(progress);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(metrics);
@@ -58,6 +62,7 @@ public sealed class JobExecutor : IAsyncDisposable
 
         _scopeFactory = scopeFactory;
         _history = history;
+        _results = results;
         _progress = progress;
         _clock = clock;
         _metrics = metrics;
@@ -152,10 +157,11 @@ public sealed class JobExecutor : IAsyncDisposable
         }
 
         var startedAt = _clock.UtcNow;
+        JobRun? started;
 
         try
         {
-            await _history.StartAsync(
+            started = await _history.StartAsync(
                 new JobRunStart
                 {
                     RunId = effectiveRunId,
@@ -164,6 +170,11 @@ public sealed class JobExecutor : IAsyncDisposable
                     Trigger = trigger,
                     InstanceId = _options.InstanceId,
                     StartedAt = startedAt,
+
+                    // What makes Skip strict across the cluster rather than only inside this
+                    // process. The gate above already refused an overlap this instance can see; the
+                    // store is what refuses one it cannot.
+                    ExclusiveKey = settings.Overlap == OverlapPolicy.Skip ? descriptor.Name : null,
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -171,6 +182,21 @@ public sealed class JobExecutor : IAsyncDisposable
         {
             Release(descriptor.Name);
             throw;
+        }
+
+        if (started is null)
+        {
+            Release(descriptor.Name);
+
+            var heldReason =
+                $"A run of '{descriptor.Name}' is already in flight on another instance and the " +
+                "overlap policy is Skip.";
+
+            await RecordSkippedAsync(
+                descriptor, scheduledFor, trigger, heldReason, effectiveRunId, cancellationToken)
+                .ConfigureAwait(false);
+
+            return DispatchResult.Skipped(heldReason);
         }
 
         var context = new JobContext(_progress)
@@ -332,7 +358,26 @@ public sealed class JobExecutor : IAsyncDisposable
             await using var serviceScope = _scopeFactory.CreateAsyncScope();
 
             var job = (IJob)serviceScope.ServiceProvider.GetRequiredService(descriptor.ImplementationType);
-            await job.ExecuteAsync(context, linkedCts.Token).ConfigureAwait(false);
+
+            // A result job's IJob.ExecuteAsync would run identically and discard what came back, so
+            // the typed path is taken purely to keep hold of it.
+            var invoker = ResultJobInvoker.For(descriptor.ImplementationType);
+
+            if (invoker is null)
+            {
+                await job.ExecuteAsync(context, linkedCts.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                var produced = await invoker
+                    .InvokeAsync(job, serviceScope.ServiceProvider, context, linkedCts.Token)
+                    .ConfigureAwait(false);
+
+                if (produced is not null)
+                {
+                    await StoreResultAsync(context.RunId, descriptor.Name, produced).ConfigureAwait(false);
+                }
+            }
 
             result = JobRunResult.Success(stopwatch.Elapsed, _clock.UtcNow);
         }
@@ -372,6 +417,27 @@ public sealed class JobExecutor : IAsyncDisposable
         // CancellationToken.None: recording why a run ended must not be cancelled by the shutdown
         // that ended it. This is what keeps history from filling with rows stuck at Running.
         await CompleteQuietlyAsync(context.RunId, result).ConfigureAwait(false);
+    }
+
+    private async Task StoreResultAsync(Guid runId, string jobName, JobResult produced)
+    {
+        if (produced.Length > _options.MaxResultBytes)
+        {
+            throw new InvalidOperationException(
+                $"'{jobName}' produced a {produced.Length:N0} byte result, over the " +
+                $"{_options.MaxResultBytes:N0} byte ceiling set by CadenceOptions.MaxResultBytes. " +
+                "Nothing was stored. Raise the ceiling, or have the job produce less.");
+        }
+
+        // Uncancellable for the same reason completions are: the bytes are what the run was for,
+        // and losing them to the shutdown that arrived mid-write is worse than waiting out the write.
+        await _results.SaveAsync(
+            runId,
+            produced,
+            _clock.UtcNow + _options.Retention.ResultMaxAge,
+            CancellationToken.None).ConfigureAwait(false);
+
+        _logger.ResultStored(runId, jobName, produced.Length, produced.ContentType);
     }
 
     private async Task RecordSkippedAsync(

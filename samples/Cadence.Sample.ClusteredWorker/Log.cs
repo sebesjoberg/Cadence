@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Cadence.Sample.ClusteredWorker;
 
@@ -46,4 +46,18 @@ internal static partial class Log
         Level = LogLevel.Information,
         Message = "Reindex finished on {Instance}.")]
     public static partial void ReindexFinished(this ILogger logger, string instance);
+
+    [LoggerMessage(
+        EventId = 7,
+        Level = LogLevel.Information,
+        Message = "Building a {Days}-day sales report for {Customer} on {Instance}.")]
+    public static partial void ReportStarting(
+        this ILogger logger, string customer, int days, string instance);
+
+    [LoggerMessage(
+        EventId = 8,
+        Level = LogLevel.Information,
+        Message = "Report {FileName} is {Bytes} bytes and ready to collect from {Instance}.")]
+    public static partial void ReportFinished(
+        this ILogger logger, string fileName, long bytes, string instance);
 }

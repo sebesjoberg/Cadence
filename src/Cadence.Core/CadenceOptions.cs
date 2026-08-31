@@ -35,6 +35,18 @@ public sealed class CadenceOptions
     /// </summary>
     public int MaxCatchUp { get; set; } = 10;
 
+    /// <summary>
+    /// Largest result a run may produce. A job that returns more fails rather than storing a
+    /// truncated one.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling exists because a result is built in memory and then written whole: without one, a
+    /// job whose output scales with its input takes the host down on the day somebody asks it for
+    /// a year of data instead of a week. Raise it deliberately, having checked the storage tier
+    /// can carry it.
+    /// </remarks>
+    public long MaxResultBytes { get; set; } = 32L * 1024 * 1024;
+
     /// <summary>What to do when a registered job cannot be resolved from the container at boot.</summary>
     public StartupValidation Validation { get; set; } = StartupValidation.ThrowOnStartup;
 
@@ -75,6 +87,12 @@ public sealed class CadenceOptions
         {
             throw new ArgumentOutOfRangeException(
                 nameof(MaxCatchUp), MaxCatchUp, "The catch-up cap must be at least one.");
+        }
+
+        if (MaxResultBytes < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(MaxResultBytes), MaxResultBytes, "The result size ceiling must be positive.");
         }
 
         if (string.IsNullOrWhiteSpace(InstanceId))

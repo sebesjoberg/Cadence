@@ -1,4 +1,4 @@
-namespace Cadence.Api;
+﻿namespace Cadence.Api;
 
 /// <summary>The run a trigger started.</summary>
 /// <param name="RunId">The run's id.</param>
@@ -59,10 +59,30 @@ public sealed record RunSummaryResponse(
     TimeSpan? Duration,
     string? Error);
 
-/// <summary>One run, with its log.</summary>
+/// <summary>One run, with its log and whatever it produced.</summary>
 /// <param name="Run">The run.</param>
 /// <param name="Log">Progress the job reported, oldest first.</param>
-public sealed record RunDetailResponse(RunSummaryResponse Run, IReadOnlyList<LogEntryResponse> Log);
+/// <param name="Result">
+/// What the run produced, or null when it produced nothing or the result has aged out. Describes
+/// the bytes; collecting them is a second request to <c>/runs/{id}/result</c>.
+/// </param>
+public sealed record RunDetailResponse(
+    RunSummaryResponse Run,
+    IReadOnlyList<LogEntryResponse> Log,
+    JobResultResponse? Result);
+
+/// <summary>What a run produced, described without transferring it.</summary>
+/// <param name="ContentType">The media type the bytes are served with.</param>
+/// <param name="FileName">Suggested filename, or null to serve inline.</param>
+/// <param name="Length">How many bytes.</param>
+/// <param name="CreatedAtUtc">When it was stored.</param>
+/// <param name="ExpiresAtUtc">When it becomes eligible for deletion.</param>
+public sealed record JobResultResponse(
+    string ContentType,
+    string? FileName,
+    long Length,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset ExpiresAtUtc);
 
 /// <summary>One progress entry.</summary>
 /// <param name="TimestampUtc">When the entry was reported.</param>

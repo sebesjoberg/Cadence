@@ -163,3 +163,21 @@ public sealed class SqlApiTokenStoreConformanceTests : ApiTokenStoreConformance
         return Task.CompletedTask;
     }
 }
+
+/// <summary>Runs the shared result contract against SQL Server.</summary>
+[Collection(SqlServerCollectionDefinition.Name)]
+public sealed class SqlJobResultStoreConformanceTests : JobResultStoreConformance
+{
+    private readonly SqlServerFixture _fixture;
+    private SqlStorageOptions? _shared;
+
+    public SqlJobResultStoreConformanceTests(SqlServerFixture fixture) => _fixture = fixture;
+
+    /// <inheritdoc />
+    protected override async Task<IJobResultStore> CreateAsync()
+    {
+        _shared ??= await _fixture.CreateMigratedAsync("results");
+
+        return new SqlJobResultStore(new SqlDatabase(_shared));
+    }
+}

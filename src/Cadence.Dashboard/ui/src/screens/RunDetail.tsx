@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { ProblemError } from '../api/problem'
 import type { RunDetailResponse } from '../api/types'
 import { Crumbs } from '../components/Crumbs'
+import { ResultDownload } from '../components/ResultDownload'
 import { RunLog } from '../components/RunLog'
 import { runDetailRoute } from '../routes/runs'
 
@@ -48,7 +49,7 @@ export function RunDetail() {
     )
   }
 
-  const { run, log } = data
+  const { run, log, result } = data
 
   return (
     <Stack gap="md">
@@ -69,6 +70,13 @@ export function RunDetail() {
         <Alert color="red" title="Run error">
           {run.error}
         </Alert>
+      )}
+
+      {result && (
+        <>
+          <Title order={5}>Result</Title>
+          <ResultDownload runId={id} result={result} />
+        </>
       )}
 
       <Title order={5}>Progress</Title>

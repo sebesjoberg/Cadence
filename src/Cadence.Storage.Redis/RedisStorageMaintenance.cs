@@ -1,4 +1,4 @@
-using Cadence.Storage.Redis.Internal;
+﻿using Cadence.Storage.Redis.Internal;
 using StackExchange.Redis;
 
 namespace Cadence.Storage.Redis;
@@ -48,6 +48,7 @@ public sealed class RedisStorageMaintenance : IStorageMaintenance
                     (int)RunStatus.Lost,
                     keys.Parts.Run,
                     offset,
+                    keys.Parts.Exclusive,
                 ]).ConfigureAwait(false);
 
             var (changed, scanned) = Pair(result);

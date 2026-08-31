@@ -1,4 +1,4 @@
-using Cadence.DependencyInjection;
+﻿using Cadence.DependencyInjection;
 using Cadence.Storage.Redis.Internal;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.DataProtection.StackExchangeRedis;
@@ -90,6 +90,12 @@ public static class CadenceRedisStorageExtensions
         services.Replace(ServiceDescriptor.Singleton<IRunHistoryStore>(
             sp => sp.GetRequiredService<RedisRunHistoryStore>()));
 
+        services.Replace(ServiceDescriptor.Singleton<IJobResultStore>(
+            sp => new RedisJobResultStore(
+                sp.GetRequiredService<RedisConnection>(),
+                sp.GetRequiredService<ISystemClock>(),
+                sp.GetRequiredService<RedisStorageOptions>())));
+
         services.TryAddSingleton(sp => new RedisScheduleSource(
             sp.GetRequiredService<RedisConnection>(),
             sp.GetRequiredService<RedisStorageOptions>(),
@@ -165,6 +171,7 @@ public static class CadenceRedisStorageExtensions
 
         services.AddSingleton<CadenceJanitor>(sp => new CadenceJanitor(
             sp.GetRequiredService<IStorageMaintenance>(),
+            sp.GetRequiredService<IJobResultStore>(),
             sp.GetRequiredService<JanitorOptions>(),
             sp.GetRequiredService<ISystemClock>(),
             sp.GetRequiredService<IOptions<CadenceOptions>>(),

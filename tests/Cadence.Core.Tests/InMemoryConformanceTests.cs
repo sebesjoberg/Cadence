@@ -49,3 +49,19 @@ public sealed class InMemoryPauseStoreConformanceTests : PauseStoreConformance
     protected override Task<IPauseStore> CreateAsync()
         => Task.FromResult<IPauseStore>(new InMemoryPauseStore(new SystemClock()));
 }
+
+/// <summary>
+/// Runs the shared result contract against the in-memory tier.
+/// </summary>
+/// <remarks>
+/// The size ceiling is raised well past what the suite writes: eviction by total size is this
+/// tier's own behaviour, covered in <see cref="InMemoryJobResultStoreTests"/>, and letting it fire
+/// mid-conformance would test the ring rather than the contract.
+/// </remarks>
+public sealed class InMemoryJobResultStoreConformanceTests : JobResultStoreConformance
+{
+    /// <inheritdoc />
+    protected override Task<IJobResultStore> CreateAsync()
+        => Task.FromResult<IJobResultStore>(
+            new InMemoryJobResultStore(new InMemoryJobResultOptions { MaxTotalBytes = 64L * 1024 * 1024 }));
+}

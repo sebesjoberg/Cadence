@@ -35,6 +35,15 @@ export interface RunSummaryResponse {
 export interface RunDetailResponse {
   run: RunSummaryResponse
   log: LogEntryResponse[]
+  result: JobResultResponse | null
+}
+
+export interface JobResultResponse {
+  contentType: string
+  fileName: string | null
+  length: number
+  createdAtUtc: string
+  expiresAtUtc: string
 }
 
 export interface LogEntryResponse {

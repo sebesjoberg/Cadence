@@ -1,4 +1,4 @@
-namespace Cadence.Storage.Redis.Internal;
+﻿namespace Cadence.Storage.Redis.Internal;
 
 /// <summary>
 /// The Lua this tier runs, and the only place multi-key atomicity comes from.
@@ -63,15 +63,29 @@ internal static class Scripts
     /// Records a run as started, whether or not a claim already wrote it.
     /// </summary>
     /// <remarks>
-    /// KEYS: run hash, all-runs, job-runs, instance-runs, running, job-names.
-    /// ARGV: run id, job name, scheduled ticks, trigger, running status, instance id, start ticks.
+    /// KEYS: run hash, all-runs, job-runs, instance-runs, running, job-names, exclusive.
+    /// ARGV: run id, job name, scheduled ticks, trigger, running status, instance id, start ticks,
+    /// exclusive key.
+    /// Returns 1 when the run started, 0 when another run already holds the exclusive key.
     /// <para>
     /// The completion fields are cleared rather than left: a run id arriving here is starting, and
     /// carrying an earlier outcome would make it read as finished the moment anyone queried it.
     /// </para>
+    /// <para>
+    /// The exclusive key is taken first and inside the same script, so there is no instant in which
+    /// it is held by a run this store cannot name. A read followed by a write would need to be two
+    /// round trips, and two round trips is the race the whole mechanism exists to avoid. The run's
+    /// own id is allowed through, so a claim followed by a start does not block itself.
+    /// </para>
     /// </remarks>
     public const string Start =
         """
+        if ARGV[8] ~= '' then
+          local owner = redis.call('GET', KEYS[7])
+          if owner and owner ~= ARGV[1] then return 0 end
+          redis.call('SET', KEYS[7], ARGV[1])
+          redis.call('HSET', KEYS[1], 'excl', ARGV[8])
+        end
         redis.call('HSET', KEYS[1],
           'job', ARGV[2], 'sched', ARGV[3], 'trig', ARGV[4],
           'status', ARGV[5], 'inst', ARGV[6], 'start', ARGV[7])
@@ -90,7 +104,7 @@ internal static class Scripts
     /// <remarks>
     /// KEYS: run hash, running.
     /// ARGV: run id, status, completed ticks, duration ms, error, job-runs fragment,
-    /// succeeded status, success suffix.
+    /// succeeded status, success suffix, exclusive fragment.
     /// <para>
     /// Doing nothing for an absent run is the contract: history the janitor already purged must not
     /// be resurrected by a completion arriving late, and a caller completing a run it never started
@@ -114,6 +128,12 @@ internal static class Scripts
             redis.call('ZADD', ARGV[6] .. job .. ARGV[8], started, ARGV[1])
           end
         end
+        local excl = redis.call('HGET', KEYS[1], 'excl')
+        if excl then
+          local ekey = ARGV[9] .. excl
+          if redis.call('GET', ekey) == ARGV[1] then redis.call('DEL', ekey) end
+          redis.call('HDEL', KEYS[1], 'excl')
+        end
         return 1
         """;
 
@@ -123,7 +143,7 @@ internal static class Scripts
     /// <remarks>
     /// KEYS: running, heartbeats.
     /// ARGV: heartbeat deadline ticks, now ticks, batch size, lost status, run fragment,
-    /// scan offset.
+    /// scan offset, exclusive fragment.
     /// Returns {reaped, scanned}.
     /// <para>
     /// The offset is why this returns how many it looked at as well as how many it changed. Live
@@ -155,6 +175,14 @@ internal static class Scripts
             end
             redis.call('HSET', key, 'status', ARGV[4], 'done', ARGV[2], 'dur', duration)
             redis.call('ZREM', KEYS[1], id)
+            -- Frees the key a dead instance held. Without this a Skip job whose owner was killed
+            -- would be blocked by a run nobody will ever complete.
+            local excl = redis.call('HGET', key, 'excl')
+            if excl then
+              local ekey = ARGV[7] .. excl
+              if redis.call('GET', ekey) == id then redis.call('DEL', ekey) end
+              redis.call('HDEL', key, 'excl')
+            end
             reaped = reaped + 1
           end
         end

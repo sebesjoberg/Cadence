@@ -1,4 +1,4 @@
-using Cadence.Execution;
+﻿using Cadence.Execution;
 using Cadence.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -94,6 +94,15 @@ internal static class ProblemMapper
         "run-not-found",
         "Run not found",
         $"No run is recorded under the id '{runId}'.");
+
+    /// <summary>Describes a run that produced nothing to collect, or whose result has aged out.</summary>
+    /// <param name="runId">The run asked for.</param>
+    public static ProblemDetails ResultNotFound(Guid runId) => Problem(
+        404,
+        "result-not-found",
+        "No result to collect",
+        $"Run '{runId}' has no result. Either the job produced none, or its result has passed " +
+        "Retention.ResultMaxAge and been swept -- the run itself is kept far longer than what it produced.");
 
     /// <summary>Describes a token name that is blank or exceeds what every tier can store.</summary>
     /// <param name="name">The name as the caller wrote it.</param>

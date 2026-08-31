@@ -1,12 +1,21 @@
-namespace Cadence.Storage;
+﻿namespace Cadence.Storage;
 
 /// <summary>Records what happened. Feeds the dashboard, the watchdog and the alert rules.</summary>
 public interface IRunHistoryStore
 {
-    /// <summary>Records that a run has begun, and returns the created record.</summary>
+    /// <summary>Records that a run has begun.</summary>
+    /// <remarks>
+    /// Returns null only when <see cref="JobRunStart.ExclusiveKey"/> is set and another running run
+    /// already holds it — the cluster-wide half of <see cref="OverlapPolicy.Skip"/>. A start
+    /// carrying no key always succeeds or throws; it never answers null. Implementations must let
+    /// genuine infrastructure failures propagate rather than answering null, for the same reason
+    /// <see cref="IOccurrenceCoordinator.TryClaimAsync"/> must: a dead store reported as "someone
+    /// else is running it" is a silently skipped run.
+    /// </remarks>
     /// <param name="start">Identity and timing of the starting run.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    Task<JobRun> StartAsync(JobRunStart start, CancellationToken cancellationToken);
+    /// <returns>The created record, or null when the exclusive key is already held.</returns>
+    Task<JobRun?> StartAsync(JobRunStart start, CancellationToken cancellationToken);
 
     /// <summary>Records a run's outcome.</summary>
     /// <param name="runId">The run to complete.</param>

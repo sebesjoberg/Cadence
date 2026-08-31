@@ -1,4 +1,4 @@
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using Cadence.DependencyInjection;
 using Cadence.Diagnostics;
 using Cadence.Execution;
@@ -308,6 +308,7 @@ public sealed class ClusteredSchedulingTests
                 var executor = new JobExecutor(
                     scopeFactory,
                     history,
+                    new InMemoryJobResultStore(),
                     new RunHistoryProgressSink(history, clock, NullLogger<RunHistoryProgressSink>.Instance),
                     clock,
                     metrics,

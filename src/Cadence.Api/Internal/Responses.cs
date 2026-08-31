@@ -1,4 +1,4 @@
-using Cadence.Storage;
+﻿using Cadence.Storage;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Cadence.Api.Internal;
@@ -30,9 +30,18 @@ internal static class Responses
 
     /// <summary>Projects a run together with the progress it reported.</summary>
     /// <param name="run">The recorded run.</param>
-    public static RunDetailResponse ToDetail(JobRun run) => new(
+    /// <param name="result">What it produced, or null when there is nothing to collect.</param>
+    public static RunDetailResponse ToDetail(JobRun run, JobResultInfo? result) => new(
         ToSummary(run),
-        [.. run.Log.Select(entry => new LogEntryResponse(entry.Timestamp.ToUniversalTime(), entry.Message))]);
+        [.. run.Log.Select(entry => new LogEntryResponse(entry.Timestamp.ToUniversalTime(), entry.Message))],
+        result is null
+            ? null
+            : new JobResultResponse(
+                result.ContentType,
+                result.FileName,
+                result.Length,
+                result.CreatedAt.ToUniversalTime(),
+                result.ExpiresAt.ToUniversalTime()));
 
     /// <summary>Projects the cluster-wide pause switches.</summary>
     /// <param name="state">The stored pause state.</param>

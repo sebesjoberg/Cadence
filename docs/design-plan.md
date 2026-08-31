@@ -196,8 +196,11 @@ Questions 5 (distributed pause) and 6 (one `MapCadence()` or two) are settled an
 ## 8. Gaps still open
 
 Numbered as first written, so the references from §13 still resolve. Closed since: **#1** (`Skip`
-cannot be strict across instances — accepted and documented as local-strict, cluster-best-effort, in
-the README beside the guarantee), **#4** (IANA ids need ICU — `CronParser` detects it and names
+cannot be strict across instances — **since closed properly**: a run of a `Skip` job holds its job
+name as an exclusive key on the run row, enforced by a filtered unique index in SQL and a key taken
+in the same script in Redis, so a second instance is refused and records a `Skipped` run. The key is
+released by the outcome write, and by the reap for an instance that died holding one — which is the
+cost, and is why the README now documents a bounded block rather than a best-effort policy), **#4** (IANA ids need ICU — `CronParser` detects it and names
 `InvariantGlobalization`), **#5** (`IWritableScheduleSource` split out) and **#6**
 (`JobContext.Report` batching — `BatchingLogAppender`, flushing on 100 entries or 250 ms, dropping
 rather than blocking, because back-pressure on `Report` would make a slow database into a slow job).

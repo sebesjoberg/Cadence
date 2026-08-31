@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 
 namespace Cadence.Sample.ClusteredWorker;
 
@@ -43,21 +43,23 @@ public sealed class TickTockJob(ILogger<TickTockJob> logger) : IJob
 }
 
 /// <summary>
-/// Runs longer than the interval between its own occurrences, deliberately, to make the caveat in
-/// the README's first screen visible rather than merely stated.
+/// Runs longer than the interval between its own occurrences, deliberately, so that cluster-wide
+/// Skip is something you watch happen rather than something the README asserts.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The occurrence is due every ten seconds and the run takes twenty-five. <see cref="OverlapPolicy.Skip"/>
-/// is strict within one instance: whichever replica is mid-run will refuse its own next occurrence.
-/// It cannot be strict across the cluster, because the claim answers "has anyone started this slot?"
-/// and not "is anyone running this job?" — so a different replica claims the next slot and starts,
-/// while the first is still going.
+/// The occurrence is due every ten seconds and the run takes twenty-five, so occurrences keep
+/// coming due while a run is still going. <see cref="OverlapPolicy.Skip"/> refuses every one of
+/// them, on every replica: the running job holds its name as an exclusive key in the store, so the
+/// replica that claims the next slot is told no and records a <see cref="RunStatus.Skipped"/> run
+/// saying another instance is already running it.
 /// </para>
 /// <para>
-/// In the trace view that is two overlapping <c>cadence.job</c> spans carrying the same
-/// <c>job.name</c> and different <c>job.instance_id</c>. That is the documented behaviour, not a
-/// bug; a job needing a hard cross-instance guarantee has to take its own lock.
+/// In the trace view that is never two overlapping <c>cadence.job</c> spans for this job — which is
+/// the point, and is what this sample checks. History fills with one running run and a trail of
+/// skipped ones naming the replica that refused. Kill the replica mid-run and the block outlasts it
+/// by a heartbeat timeout, because the key is only released when the janitor reaps the run its
+/// owner never finished.
 /// </para>
 /// </remarks>
 [ScheduledJob(
