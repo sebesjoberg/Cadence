@@ -87,7 +87,7 @@ internal static partial class Log
                   "authentication, so the configuration says one thing.")]
     public static partial void AuthenticationDisabledButIgnored(this ILogger logger, string basePath);
 
-    // v0.4 audits schedule edits to the log alone; an audit table is parked.
+    // Schedule edits are audited to the log alone; an audit table is parked.
     [LoggerMessage(
         EventId = 3007,
         Level = LogLevel.Information,

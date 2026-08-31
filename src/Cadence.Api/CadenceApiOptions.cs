@@ -3,8 +3,8 @@ using Cadence.Api.Internal;
 namespace Cadence.Api;
 
 /// <summary>
-/// Settings for the HTTP control surface. Shared by <c>MapCadenceApi</c> and, from v0.4, the
-/// dashboard: §7 answer #6 kept one options object even after the map calls were split in two.
+/// Settings for the HTTP control surface. Shared by <c>MapCadenceApi</c> and the dashboard: one
+/// options object was kept even after the map calls were split in two.
 /// </summary>
 public sealed class CadenceApiOptions
 {

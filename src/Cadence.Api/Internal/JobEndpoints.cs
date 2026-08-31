@@ -110,7 +110,7 @@ internal static class JobEndpoints
 
         try
         {
-            // No payload, on either tree. §13.2: accepting caller JSON would widen the route from
+            // No payload, on either tree: accepting caller JSON would widen the route from
             // "start the job as configured" to "start the job with arbitrary input".
             result = await trigger.TriggerAsync(name, kind, payload: null, cancellationToken);
         }
