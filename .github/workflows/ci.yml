@@ -61,6 +61,39 @@ jobs:
           name: test-results
           path: artifacts/test-results/*.trx
 
+      # A per-assembly table on the run page itself. The check run above says pass or fail; this
+      # says how much ran, which is what catches a suite that silently stopped being collected.
+      - name: Summarise test results
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, os, xml.etree.ElementTree as ET
+
+          ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
+          rows, totals = [], [0, 0, 0, 0]
+
+          for path in sorted(glob.glob('artifacts/test-results/*.trx')):
+              root = ET.parse(path).getroot()
+              counters = root.find(f'{ns}ResultSummary/{ns}Counters')
+              if counters is None:
+                  continue
+
+              unit = root.find(f'{ns}TestDefinitions/{ns}UnitTest')
+              name = os.path.basename(unit.get('storage', path)) if unit is not None else path
+              got = [int(counters.get(k, 0)) for k in ('total', 'passed', 'failed', 'notExecuted')]
+
+              rows.append((name.removesuffix('.dll'), *got))
+              totals = [a + b for a, b in zip(totals, got)]
+
+          print('## .NET tests')
+          print()
+          print('| Suite | Total | Passed | Failed | Skipped |')
+          print('|---|--:|--:|--:|--:|')
+          for row in rows:
+              print('| `{}` | {} | {} | {} | {} |'.format(*row))
+          print('| **Total** | **{}** | **{}** | **{}** | **{}** |'.format(*totals))
+          PY
+
       # Third party holding checks: write, so pinned by digest. a43b3a5 is v3.0.0.
       - name: Publish test report
         if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
@@ -116,6 +149,33 @@ jobs:
         with:
           name: frontend-test-results
           path: src/Cadence.Dashboard/ui/test-results/frontend.xml
+
+      # The same shape as the .NET summary, so one run page reads consistently top to bottom.
+      - name: Summarise test results
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse('test-results/frontend.xml').getroot()
+          rows, totals = [], [0, 0, 0, 0]
+
+          for suite in root.findall('testsuite'):
+              got = [int(suite.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped')]
+              total, failures, errors, skipped = got
+              row = (total, total - failures - errors - skipped, failures + errors, skipped)
+
+              rows.append((suite.get('name', '?'), *row))
+              totals = [a + b for a, b in zip(totals, row)]
+
+          print('## Frontend tests')
+          print()
+          print('| Suite | Total | Passed | Failed | Skipped |')
+          print('|---|--:|--:|--:|--:|')
+          for row in rows:
+              print('| `{}` | {} | {} | {} | {} |'.format(*row))
+          print('| **Total** | **{}** | **{}** | **{}** | **{}** |'.format(*totals))
+          PY
 
       # Same pinned digest as the .NET job. Vitest's JUnit output is the shape jest-junit reads.
       - name: Publish test report
