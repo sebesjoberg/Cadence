@@ -1,5 +1,7 @@
 # Cadence
 
+[![CI](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebesjoberg/Cadence/actions/workflows/ci.yml)
+
 A job scheduler for .NET where **schedules live in a database and are editable at
 runtime**. Jobs are plain classes resolved from DI, one fresh scope per run, and
 multiple app instances coordinate so no scheduled slot runs twice.
@@ -398,6 +400,11 @@ tokens with scopes on both storage tiers, and the Data Protection key ring descr
 the operator dashboard, is complete too: `AddDashboard()` and `MapCadenceDashboard()`, described in
 [The operator dashboard](#the-operator-dashboard), and both Aspire samples map it alongside the API.
 Not yet published to NuGet.
+
+Every push and pull request runs two suites, each publishing its own check: **tests** covers the
+.NET solution — including the storage conformance suites, which start a real SQL Server and Redis
+against the runner's Docker socket rather than skipping — and **frontend tests** covers the
+dashboard's TypeScript. The badge above is green only when both are.
 
 - [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
 

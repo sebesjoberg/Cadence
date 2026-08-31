@@ -100,5 +100,28 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Two reporters: the default one keeps the log readable, the JUnit one is what the check run
+      # below is built from. Vitest ships both, so this needs no extra dependency.
       - name: Test
-        run: npm test
+        id: test
+        run: >
+          npm test --
+          --reporter=default --reporter=junit
+          --outputFile.junit=test-results/frontend.xml
+
+      # Publish on failure too — that is when the detail matters.
+      - name: Upload test results
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-test-results
+          path: src/Cadence.Dashboard/ui/test-results/frontend.xml
+
+      # Same pinned digest as the .NET job. Vitest's JUnit output is the shape jest-junit reads.
+      - name: Publish test report
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
+        with:
+          name: frontend tests
+          path: src/Cadence.Dashboard/ui/test-results/frontend.xml
+          reporter: jest-junit
