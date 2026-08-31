@@ -132,7 +132,7 @@ Three limits worth knowing before relying on this:
   in memory on both ends. Over the ceiling it throws rather than silently declining.
 
 Nothing supplies a `TRequest` over HTTP yet. `POST /jobs/{name}/trigger` passes no payload on
-either tree, on purpose — [design plan](docs/design-plan.md) §13.2 keeps it from widening into
+either tree, on purpose — [design decisions](docs/design-plan.md) §13.2 keeps it from widening into
 "run any job with arbitrary input" — so a request today can only come from an in-process
 `IJobTrigger` call. Submitted work items are what will give one a route of its own.
 
@@ -381,7 +381,7 @@ things the dashboard does not do:
 - **A job's `Settings` are displayed and round-tripped verbatim, never edited.** The form shows
   them and carries them through unchanged on every save; writing them needs the store directly.
 - **A schedule edit is audited to the log only**, as who changed which job's cron and to what — no
-  audit table exists. [Design plan](docs/design-plan.md) §14.5 records the one that would.
+  audit table exists. [Design decisions](docs/design-plan.md) §14.5 records the one that would.
 
 Both trees log through source-generated `LoggerMessage`s with a fixed event id per message:
 `Cadence.Api`'s run 3000–3007 and 3100–3102, `Cadence.Dashboard`'s start at 3200 — grepping logs
@@ -499,17 +499,16 @@ dotnet run --project samples/Cadence.Sample.AppHost.Sql
 one run per occurrence, a pause reaching every replica, and what measurably differs between the
 two tiers.
 
-**Status:** pre-release. v0.2 — persistence and clustering, on SQL Server or Redis — is complete,
-with both tiers held to one conformance suite that runs against a real server in CI, and a pair of
-Aspire multi-replica samples demonstrates it between real processes on both tiers. v0.3, the
-control surface, is complete: the machine-callable API, its token auth gate and the health checks
-described above, alongside distributed pause. v0.3.1, identity, is complete too: OIDC sign-in, API
-tokens with scopes on both storage tiers, and the Data Protection key ring described above. v0.4,
-the operator dashboard, is complete too: `AddDashboard()` and `MapCadenceDashboard()`, described in
-[The operator dashboard](#the-operator-dashboard), and both Aspire samples map it alongside the API.
-Not yet published to NuGet.
+**Status:** pre-release, and not yet published to NuGet. Everything described above is built and
+tested: scheduling, both storage tiers under one conformance suite that runs against a real server in
+CI, distributed pause, the machine-callable API and its gate, health checks, OIDC sign-in with API
+tokens, and the operator dashboard. Two milestones remain before 1.0 — **alerting** (per-job rules,
+throttling, the `NotSucceededWithin` watchdog, SMTP and Twilio) and **tooling** (source-generated
+registration, analyzers, a test host). [The plan to 1.0](docs/plan-to-1.0.md) has the remaining work,
+the open gaps, and the order they should be done in.
 
-- [Design plan](docs/design-plan.md) — the map: key decisions, layering, build order.
+- [The plan to 1.0](docs/plan-to-1.0.md) — what is left, and in what order.
+- [Design decisions](docs/design-plan.md) — why the shipped parts are the way they are.
 
 ## Licence
 
